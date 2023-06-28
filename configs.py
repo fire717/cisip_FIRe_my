@@ -133,7 +133,7 @@ def nclass(config):
 def R(config):
     r = {
         'imagenet100': 1000,
-        'cifar10': 59000,
+        'cifar10': 55800,  # mAP@all #原始是59000 按ASZH零样本改为55800
         'cifar10_2': 50000,
         'cifar10_II': 50000,
         'nuswide': 5000,

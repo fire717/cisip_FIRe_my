@@ -18,6 +18,18 @@ from functions.evaluate_roxf import configdataset, DATASETS
 from functions.mining import SimpleMemoryBank
 from utils.augmentations import GaussianBlurOpenCV
 
+DATA_FOLDER = {
+    'nuswide': 'data/nuswide_v2_256_resize',  # resize to 256x256
+    'imagenet': 'data/imagenet_resize',  # resize to 224x224
+    'cifar': 'data/cifar',  # auto generate
+    'coco': 'data/coco',
+    'gldv2': 'data/gldv2delgembed',
+    'roxf': 'data/roxford5kdelgembed',
+    'rpar': 'data/rparis5kdelgembed',
+    'awa2': '../data/AwA2/Animals_with_Attributes2',
+    'cub': '../data/CUB_200_2011',
+    'sun': '../data/SUN/'
+}
 
 class BaseDataset(Dataset, ABC):
     def get_img_paths(self):
@@ -605,38 +617,126 @@ def one_hot(nclass):
     return f
 
 
+# def cifar(nclass, **kwargs):
+#     transform = kwargs['transform']
+#     ep = kwargs['evaluation_protocol']
+#     fn = kwargs['filename']
+#     reset = kwargs['reset']
+
+#     CIFAR = CIFAR10 if int(nclass) == 10 else CIFAR100
+#     traind = CIFAR(f'data/cifar{nclass}',
+#                    transform=transform, target_transform=one_hot(int(nclass)),
+#                    train=True, download=True)
+#     traind = IndexDatasetWrapper(traind)
+#     testd = CIFAR(f'data/cifar{nclass}',
+#                   transform=transform, target_transform=one_hot(int(nclass)),
+#                   train=False, download=True)
+#     testd = IndexDatasetWrapper(testd)
+
+#     if ep == 2:  # using orig train and test
+#         if fn == 'test.txt':
+#             return testd
+#         else:  # train.txt and database.txt
+#             return traind
+
+#     combine_data = np.concatenate([traind.data, testd.data], axis=0)
+#     combine_targets = np.concatenate([traind.targets, testd.targets], axis=0)
+
+#     path = f'data/cifar{nclass}/0_0_{ep}_{fn}'
+
+#     load_data = fn == 'train.txt'
+#     load_data = load_data and (reset or not os.path.exists(path))
+
+#     if not load_data:
+#         logging.info(f'Loading {path}')
+#         data_index = torch.load(path)
+#     else:
+#         train_data_index = []
+#         query_data_index = []
+#         db_data_index = []
+
+#         data_id = np.arange(combine_data.shape[0])  # [0, 1, ...]
+
+#         for i in range(nclass):
+#             class_mask = combine_targets == i
+#             index_of_class = data_id[class_mask].copy()  # index of the class [2, 10, 656,...]
+#             np.random.shuffle(index_of_class)
+
+#             if ep == 1:
+#                 query_n = 100  # // (nclass // 10)
+#                 train_n = 500  # // (nclass // 10)
+
+#                 index_for_query = index_of_class[:query_n].tolist()
+
+#                 index_for_db = index_of_class[query_n:].tolist()
+#                 index_for_train = index_for_db[:train_n]
+#             elif ep == 2:  # ep2 = take all data
+#                 query_n = 1000  # // (nclass // 10)
+
+#                 index_for_query = index_of_class[:query_n].tolist()
+#                 index_for_db = index_of_class[query_n:].tolist()
+#                 index_for_train = index_for_db
+
+#             elif ep == 3:  # Bi-Half Cifar10(II)
+#                 query_n = 1000
+#                 train_n = 500
+#                 index_for_query = index_of_class[:query_n].tolist()
+#                 index_for_db = index_of_class[query_n:].tolist()
+#                 index_for_train = index_for_db[:train_n]
+
+#             else:
+#                 raise NotImplementedError('')
+
+#             train_data_index.extend(index_for_train)
+#             query_data_index.extend(index_for_query)
+#             db_data_index.extend(index_for_db)
+
+#         train_data_index = np.array(train_data_index)
+#         query_data_index = np.array(query_data_index)
+#         db_data_index = np.array(db_data_index)
+
+#         torch.save(train_data_index, f'data/cifar{nclass}/0_0_{ep}_train.txt')
+#         torch.save(query_data_index, f'data/cifar{nclass}/0_0_{ep}_test.txt')
+#         torch.save(db_data_index, f'data/cifar{nclass}/0_0_{ep}_database.txt')
+
+#         data_index = {
+#             'train.txt': train_data_index,
+#             'test.txt': query_data_index,
+#             'database.txt': db_data_index
+#         }[fn]
+
+#     traind.data = combine_data[data_index]
+#     traind.targets = combine_targets[data_index]
+
+#     return traind
+
 def cifar(nclass, **kwargs):
     transform = kwargs['transform']
     ep = kwargs['evaluation_protocol']
     fn = kwargs['filename']
     reset = kwargs['reset']
 
+    prefix = DATA_FOLDER['cifar']
+
     CIFAR = CIFAR10 if int(nclass) == 10 else CIFAR100
-    traind = CIFAR(f'data/cifar{nclass}',
+    traind = CIFAR(f'{prefix}{nclass}',
                    transform=transform, target_transform=one_hot(int(nclass)),
                    train=True, download=True)
     traind = IndexDatasetWrapper(traind)
-    testd = CIFAR(f'data/cifar{nclass}',
-                  transform=transform, target_transform=one_hot(int(nclass)),
-                  train=False, download=True)
+    testd = CIFAR(f'{prefix}{nclass}', train=False, download=True)
     testd = IndexDatasetWrapper(testd)
-
-    if ep == 2:  # using orig train and test
-        if fn == 'test.txt':
-            return testd
-        else:  # train.txt and database.txt
-            return traind
-
+    
     combine_data = np.concatenate([traind.data, testd.data], axis=0)
     combine_targets = np.concatenate([traind.targets, testd.targets], axis=0)
 
-    path = f'data/cifar{nclass}/0_0_{ep}_{fn}'
+    path = f'{prefix}{nclass}/0_{ep}_{fn}'
 
     load_data = fn == 'train.txt'
     load_data = load_data and (reset or not os.path.exists(path))
 
+
     if not load_data:
-        logging.info(f'Loading {path}')
+        print(f'Loading {path}')
         data_index = torch.load(path)
     else:
         train_data_index = []
@@ -645,58 +745,90 @@ def cifar(nclass, **kwargs):
 
         data_id = np.arange(combine_data.shape[0])  # [0, 1, ...]
 
-        for i in range(nclass):
+        ### 22零样本划分
+        class_ids = [x for x in range(nclass)]
+        random.shuffle(class_ids)
+        seen_class = class_ids[:8]
+        unseen_class = class_ids[8:]
+        for i in seen_class:
             class_mask = combine_targets == i
             index_of_class = data_id[class_mask].copy()  # index of the class [2, 10, 656,...]
             np.random.shuffle(index_of_class)
 
-            if ep == 1:
-                query_n = 100  # // (nclass // 10)
-                train_n = 500  # // (nclass // 10)
+            train_n = 500  # // (nclass // 10)
 
-                index_for_query = index_of_class[:query_n].tolist()
-
-                index_for_db = index_of_class[query_n:].tolist()
-                index_for_train = index_for_db[:train_n]
-            elif ep == 2:  # ep2 = take all data
-                query_n = 1000  # // (nclass // 10)
-
-                index_for_query = index_of_class[:query_n].tolist()
-                index_for_db = index_of_class[query_n:].tolist()
-                index_for_train = index_for_db
-
-            elif ep == 3:  # Bi-Half Cifar10(II)
-                query_n = 1000
-                train_n = 500
-                index_for_query = index_of_class[:query_n].tolist()
-                index_for_db = index_of_class[query_n:].tolist()
-                index_for_train = index_for_db[:train_n]
-
-            else:
-                raise NotImplementedError('')
+            index_for_train = index_of_class[:train_n].tolist()
+            index_for_db = index_of_class[train_n:].tolist()
 
             train_data_index.extend(index_for_train)
+            db_data_index.extend(index_for_db)
+        for i in unseen_class:
+            class_mask = combine_targets == i
+            index_of_class = data_id[class_mask].copy()  # index of the class [2, 10, 656,...]
+            np.random.shuffle(index_of_class)
+
+            query_n = 100  # // (nclass // 10)
+
+            index_for_query = index_of_class[:query_n].tolist()
+            index_for_db = index_of_class[query_n:].tolist()
+
             query_data_index.extend(index_for_query)
             db_data_index.extend(index_for_db)
 
+        ### 21原始划分：每类数据打乱，然后取前1000作为test query，后面的作为db
+        # for i in range(nclass):
+        #     class_mask = combine_targets == i
+        #     index_of_class = data_id[class_mask].copy()  # index of the class [2, 10, 656,...]
+        #     np.random.shuffle(index_of_class)
+
+        #     if ep == 1:
+        #         #21论文原始划分
+        #         query_n = 100  # // (nclass // 10)
+        #         train_n = 500  # // (nclass // 10)
+
+        #         index_for_query = index_of_class[:query_n].tolist()
+
+        #         index_for_db = index_of_class[query_n:].tolist()
+        #         index_for_train = index_for_db[:train_n]
+        #     else:  # ep2 = take all data
+        #         query_n = 1000  # // (nclass // 10)
+
+        #         index_for_query = index_of_class[:query_n].tolist()
+        #         index_for_db = index_of_class[query_n:].tolist()
+        #         index_for_train = index_for_db
+        #         print(i, len(index_for_query), len(index_for_db), len(index_for_train))
+
+        #     train_data_index.extend(index_for_train)
+        #     query_data_index.extend(index_for_query)
+        #     db_data_index.extend(index_for_db)
+
+ 
         train_data_index = np.array(train_data_index)
         query_data_index = np.array(query_data_index)
         db_data_index = np.array(db_data_index)
 
-        torch.save(train_data_index, f'data/cifar{nclass}/0_0_{ep}_train.txt')
-        torch.save(query_data_index, f'data/cifar{nclass}/0_0_{ep}_test.txt')
-        torch.save(db_data_index, f'data/cifar{nclass}/0_0_{ep}_database.txt')
+        torch.save(train_data_index, f'data/cifar{nclass}/0_{ep}_train.txt')
+        torch.save(query_data_index, f'data/cifar{nclass}/0_{ep}_test.txt')
+        torch.save(db_data_index, f'data/cifar{nclass}/0_{ep}_database.txt')
 
         data_index = {
             'train.txt': train_data_index,
             'test.txt': query_data_index,
             'database.txt': db_data_index
         }[fn]
-
+        # print(len(train_data_index)) #4000    5000
+        # print(len(query_data_index)) #200     1000
+        # print(len(db_data_index))    #55800   59000   1000测试集和数据库应该是隔离的，5000训练数据应该是从59000里选的
+        # bb
+    #print(len(combine_data),combine_data.shape) #60000 (60000, 32, 32, 3)
+    
     traind.data = combine_data[data_index]
     traind.targets = combine_targets[data_index]
+    #print(combine_targets.shape)  #60000  即0-9的十类类别标签
+    #print(min(combine_targets))  0 
 
     return traind
+
 
 
 def imagenet100(**kwargs):

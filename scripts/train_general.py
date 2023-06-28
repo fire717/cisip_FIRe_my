@@ -149,6 +149,8 @@ def train_hashing(optimizer, model, train_loader, device, loss_name, loss_cfg, o
         else:
             optimizer.zero_grad()
 
+        # print(len(batch),batch)
+        # bb
         data, labels, index = batch[:3]
         data, labels = data.to(device), labels.to(device)
         if gpu_train_transform is not None:

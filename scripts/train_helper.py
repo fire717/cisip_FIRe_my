@@ -233,7 +233,8 @@ def prepare_dataloader(config,
                                                           weak_mode=0)
     else:
         train_dataset = None
-
+    #print(include_train,dataset_type) True  ''
+    
     separate_multiclass = config['dataset_kwargs'].get('separate_multiclass', False)
     config['dataset_kwargs']['separate_multiclass'] = False
     return_id = config['dataset'] in ['landmark']
