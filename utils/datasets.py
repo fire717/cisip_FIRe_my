@@ -2,7 +2,7 @@ import logging
 import os
 from abc import ABC
 from typing import Tuple, Any
-
+import random
 import numpy as np
 import torch
 import torchvision
@@ -17,6 +17,7 @@ import configs
 from functions.evaluate_roxf import configdataset, DATASETS
 from functions.mining import SimpleMemoryBank
 from utils.augmentations import GaussianBlurOpenCV
+import scipy.io as sio
 
 DATA_FOLDER = {
     'nuswide': 'data/nuswide_v2_256_resize',  # resize to 256x256
@@ -185,6 +186,370 @@ class Denormalize(object):
             t.mul_(s).add_(m)
         return tensor
 
+
+class AwA2Dataset(Dataset):
+    def __init__(self, root,
+                 transform=None,
+                 filename='train'):
+        self.transform = transform
+        self.filename = filename
+        self.loader = pil_loader
+        self.root = os.path.expanduser(root)
+        self.seen_class_path = os.path.join(self.root, 'trainclasses.txt')
+        self.unseen_class_path = os.path.join(self.root, 'testclasses.txt')
+        self.img_dir = os.path.join(self.root,"JPEGImages")
+        self.class_id_path = os.path.join(self.root,"classes.txt")
+        self.attr_path = os.path.join(self.root,"predicate-matrix-continuous.txt")
+
+        self.all_class_names = []
+        self.use_classes = []
+
+        self.init_data()
+
+    def init_data(self):
+        with open(self.class_id_path, 'r') as f:
+            lines = f.readlines()
+        for line in lines:
+            idx,name = line.strip().split('\t')
+            #print(idx,name) #代码从0开始因此实际id会-1
+            self.all_class_names.append(name)
+        print("Load classes: ", len(self.all_class_names))
+
+        seen_classes = []
+        unseen_classes = []
+        if 'train' in self.filename:
+            with open(self.seen_class_path, 'r') as f:
+                lines = f.readlines()
+            seen_classes = [line.strip() for line in lines]
+        elif 'test' in self.filename:
+            with open(self.unseen_class_path, 'r') as f:
+                lines = f.readlines()
+            unseen_classes = [line.strip() for line in lines]
+        elif 'database' in self.filename:
+            with open(self.seen_class_path, 'r') as f:
+                lines = f.readlines()
+            seen_classes = [line.strip() for line in lines]
+            with open(self.unseen_class_path, 'r') as f:
+                lines = f.readlines()
+            unseen_classes = [line.strip() for line in lines]
+        else:
+            raise Excepetion("Unkown filename")
+
+        total_classes = seen_classes+unseen_classes
+        print(self.filename, " count classes: ", len(total_classes))
+        total_path = []
+        total_labels = []
+
+        self.train_data = []
+        self.train_labels = []
+        for classname in total_classes:
+            class_dir = os.path.join(self.root,'JPEGImages',classname)
+            img_names = os.listdir(class_dir)
+            random.shuffle(img_names)
+            if 'database' in self.filename:
+                use_names = img_names[100:]
+            else:
+                use_names = img_names[:100]
+
+            for name in use_names:
+                img_path = os.path.join(class_dir,name)
+                img_label = [0 for _ in range(len(self.all_class_names))]
+                img_label[self.all_class_names.index(classname)] = 1
+                self.train_data.append(img_path)
+                self.train_labels.append(img_label)
+        
+        self.train_data = np.array(self.train_data)
+        self.train_labels = np.array(self.train_labels, dtype=np.float)
+        print(f'Number of data: {self.train_data.shape[0]}')
+
+
+        ###load attr
+        attr_data = []
+        #print(self.attr_path)
+        with open(self.attr_path,'r') as f:
+            lines = f.readlines()
+            #print(len(lines))
+            for line in lines:
+                values = [float(x) for x in line.strip().replace("    "," ").replace("   "," ").replace("  "," ").split(" ")]
+                #参考2020nipt读取的mat，反推出的归一化方式
+                mean = np.mean(values)
+                std_dev = np.std(values)
+                standardized_array = (values - mean) / std_dev
+                attr_data.append(standardized_array)
+        attr_data = np.array(attr_data) #50x85
+        # print(attr_data)
+        # bb
+        #这里顺序应该和classes一致
+        #print(self.all_class_names, seen_classes)
+        with open(self.seen_class_path, 'r') as f:
+            lines = f.readlines()
+        seen_classes = [line.strip() for line in lines]
+        with open(self.unseen_class_path, 'r') as f:
+            lines = f.readlines()
+        unseen_classes = [line.strip() for line in lines]
+        total_classes = seen_classes+unseen_classes
+        seen_id = [self.all_class_names.index(name) for name in total_classes]
+        self.attr_data = attr_data[seen_id] #40x85for train 改成直接取所有类50x85
+        # print(self.attr_data.shape)
+        # bb
+
+    def __getitem__(self, index):
+        """
+        Args:
+            index (int): Index
+        Returns:
+            tuple: (image, target) where target is index of the target class.
+        """
+        img, target = self.train_data[index], self.train_labels[index]
+        target = torch.tensor(target)
+
+        img = self.loader(img)
+
+        #print("1111",img.size)
+        if self.transform is not None:
+            img = self.transform(img)
+        #print("2222",img.shape)
+        return img, target, self.train_data[index]
+
+    def __len__(self):
+        return len(self.train_data)
+
+class CubDataset(Dataset):
+    def __init__(self, root,
+                 transform=None,
+                 filename='train'):
+        self.transform = transform
+        self.filename = filename
+        self.loader = pil_loader
+        self.root = os.path.expanduser(root)
+        self.seen_unseen_path = os.path.join(self.root, 'train_test_split.txt')
+        self.img_dir = os.path.join(self.root,"images")
+        self.class_id_path = os.path.join(self.root,"classes.txt")
+        self.attr_path = os.path.join(self.root,"attributes","class_attribute_labels_continuous.txt")
+
+        self.all_class_names = []
+        self.use_classes = []
+
+        self.init_data()
+
+    def init_data(self):
+        with open(self.class_id_path, 'r') as f:
+            class_lines = f.readlines()
+        for line in class_lines:
+            idx,name = line.strip().split(' ')
+            #print(idx,name) #代码从0开始因此实际id会-1
+            self.all_class_names.append(name)
+        print("Load classes: ", len(self.all_class_names))
+
+
+        seen_classes = []
+        unseen_classes = []
+        if 'train' in self.filename:
+            seen_classes = [line.strip().split(' ')[1] for line in class_lines[:150]]
+        elif 'test' in self.filename:
+            unseen_classes = [line.strip().split(' ')[1] for line in class_lines[150:]]
+        elif 'database' in self.filename:
+            seen_classes = [line.strip().split(' ')[1] for line in class_lines[:150]]
+            unseen_classes = [line.strip().split(' ')[1] for line in class_lines[150:]]
+        else:
+            raise Excepetion("Unkown filename")
+
+        total_classes = seen_classes+unseen_classes
+        print(self.filename, " count classes: ", len(total_classes))
+        total_path = []
+        total_labels = []
+
+        self.train_data = []
+        self.train_labels = []
+        for classname in total_classes:
+            class_dir = os.path.join(self.root,'images',classname)
+            img_names = os.listdir(class_dir)
+            random.shuffle(img_names)
+            if 'database' in self.filename:
+                use_names = img_names[30:]
+            else:
+                use_names = img_names[:30]
+
+            for name in use_names:
+                img_path = os.path.join(class_dir,name)
+                img_label = [0 for _ in range(len(self.all_class_names))]
+                img_label[self.all_class_names.index(classname)] = 1
+                self.train_data.append(img_path)
+                self.train_labels.append(img_label)
+        
+        self.train_data = np.array(self.train_data)
+        self.train_labels = np.array(self.train_labels, dtype=np.float)
+        print(f'Number of data: {self.train_data.shape[0]}')
+
+
+        ###load attr
+        attr_data = []
+        #print(self.attr_path)
+        with open(self.attr_path,'r') as f:
+            lines = f.readlines()
+            #print(len(lines))
+            for line in lines:
+                values = [float(x) for x in line.strip().replace("    "," ").replace("   "," ").replace("  "," ").split(" ")]
+                #参考2020nipt读取的mat，反推出的归一化方式
+                mean = np.mean(values)
+                std_dev = np.std(values)
+                standardized_array = (values - mean) / std_dev
+                attr_data.append(standardized_array)
+        attr_data = np.array(attr_data) #50x85
+        # print(attr_data)
+        # bb
+        #这里顺序应该和classes一致
+        #print(self.all_class_names, seen_classes)
+        seen_classes = [line.strip().split(' ')[1] for line in class_lines[:150]]
+        unseen_classes = [line.strip().split(' ')[1] for line in class_lines[150:]]
+        total_classes = seen_classes+unseen_classes
+        seen_id = [self.all_class_names.index(name) for name in total_classes]
+        self.attr_data = attr_data[seen_id] #40x85for train 改成直接取所有类50x85
+        # print(self.attr_data.shape)
+        # bb
+
+    def __getitem__(self, index):
+        """
+        Args:
+            index (int): Index
+        Returns:
+            tuple: (image, target) where target is index of the target class.
+        """
+        img, target = self.train_data[index], self.train_labels[index]
+        target = torch.tensor(target)
+
+        img = self.loader(img)
+
+        #print("1111",img.size)
+        if self.transform is not None:
+            img = self.transform(img)
+        #print("2222",img.shape)
+        return img, target, self.train_data[index]
+
+    def __len__(self):
+        return len(self.train_data)
+
+
+class SunDataset(Dataset):
+    def __init__(self, root,
+                 transform=None,
+                 filename='train'):
+        self.transform = transform
+        self.filename = filename
+        self.loader = pil_loader
+        self.root = os.path.expanduser(root)
+        self.img_paths = os.path.join(self.root,'SUNAttributeDB', 'images.mat')
+        self.img_dir = os.path.join(self.root,"images")
+        self.attr_path = os.path.join(self.root,"SUNAttributeDB","attributeLabels_continuous.mat")
+
+        self.all_class_names = []
+
+        self.init_data()
+
+    def init_data(self):
+        img_paths = sio.loadmat(self.img_paths)['images']
+        img_paths = [x[0][0] for x in img_paths]
+        basenames = [os.path.basename(x) for x in img_paths]
+        print(len(img_paths),img_paths[:3])
+        self.all_class_names = list(set([os.path.dirname(img_path) for img_path in img_paths]))
+        #print(len(self.all_class_names),self.all_class_names[:3])
+        print("Load classes: ", len(self.all_class_names))
+
+
+        seen_classes = []
+        unseen_classes = []
+        if 'train' in self.filename:
+            seen_classes = self.all_class_names[:500]
+        elif 'test' in self.filename:
+            unseen_classes = self.all_class_names[500:]
+        elif 'database' in self.filename:
+            seen_classes = self.all_class_names[:500]
+            unseen_classes = self.all_class_names[500:]
+        else:
+            raise Excepetion("Unkown filename")
+
+        total_classes = seen_classes+unseen_classes
+        print(self.filename, " count classes: ", len(total_classes))
+        total_path = []
+        total_labels = []
+
+        self.train_data = []
+        self.train_labels = []
+        for classname in total_classes:
+            class_dir = os.path.join(self.img_dir,classname)
+            img_names = os.listdir(class_dir)
+            assert 20<=len(img_names)<25
+            img_names = [name for name in img_names if (name in basenames)]
+            # print(class_dir,len(img_names))
+            # bb
+            assert 20==len(img_names)
+            
+            # img_names = [img_path for img_path in img_paths if classname in img_path]
+            random.shuffle(img_names)
+            if 'database' in self.filename:
+                use_names = img_names[10:]
+            else:
+                use_names = img_names[:10]
+
+            for name in use_names:
+                img_path = os.path.join(class_dir,name)
+                img_label = [0 for _ in range(len(self.all_class_names))]
+                img_label[self.all_class_names.index(classname)] = 1
+                self.train_data.append(img_path)
+                self.train_labels.append(img_label)
+        
+        self.train_data = np.array(self.train_data)
+        self.train_labels = np.array(self.train_labels, dtype=np.float)
+        print(f'Number of data: {self.train_data.shape[0]}')
+
+
+        ###load attr
+        img_attr_data = sio.loadmat(self.attr_path)['labels_cv']
+        self.attr_data = []
+        class_attr = [img_attr_data[0]]
+        #print(class_attr)
+        for i in range(1,len(img_paths)):
+            if os.path.dirname(img_paths[i]) != os.path.dirname(img_paths[i-1]):
+                #print(class_attr)
+                class_attr_mean = np.mean(class_attr,axis=0)
+                self.attr_data.append(class_attr_mean)
+            class_attr.append(img_attr_data[i])
+        class_attr_mean = np.mean(class_attr,axis=0)
+        self.attr_data.append(class_attr_mean)
+        self.attr_data = np.array(self.attr_data)
+        # print(self.attr_data.shape)  #(717, 102)
+        # bb
+        #这里顺序应该和classes一致
+        #print(self.all_class_names, seen_classes)
+        # seen_classes = self.all_class_names[:500]
+        # unseen_classes = self.all_class_names[500:]
+        # total_classes = seen_classes+unseen_classes
+        # seen_id = [self.all_class_names.index(name) for name in total_classes]
+        # self.attr_data = attr_data[seen_id] #40x85for train 改成直接取所有类50x85
+        # print(self.attr_data.shape)
+        # bb
+
+    def __getitem__(self, index):
+        """
+        Args:
+            index (int): Index
+        Returns:
+            tuple: (image, target) where target is index of the target class.
+        """
+        img, target = self.train_data[index], self.train_labels[index]
+
+        target = torch.tensor(target)
+
+        img = self.loader(img)
+
+        #print("1111",img.size)
+        if self.transform is not None:
+            img = self.transform(img)
+        #print("2222",img.shape)
+        return img, target, self.train_data[index]
+
+    def __len__(self):
+        return len(self.train_data)
 
 class InstanceDiscriminationDataset(BaseDataset):
     def augment_image(self, img):
@@ -710,6 +1075,7 @@ def one_hot(nclass):
 
 #     return traind
 
+
 def cifar(nclass, **kwargs):
     transform = kwargs['transform']
     ep = kwargs['evaluation_protocol']
@@ -725,7 +1091,7 @@ def cifar(nclass, **kwargs):
     traind = IndexDatasetWrapper(traind)
     testd = CIFAR(f'{prefix}{nclass}', train=False, download=True)
     testd = IndexDatasetWrapper(testd)
-    
+
     combine_data = np.concatenate([traind.data, testd.data], axis=0)
     combine_targets = np.concatenate([traind.targets, testd.targets], axis=0)
 
@@ -829,8 +1195,27 @@ def cifar(nclass, **kwargs):
 
     return traind
 
+def awa2(**kwargs):
+    transform = kwargs['transform']
+    filename = kwargs['filename']
 
+    d = AwA2Dataset(DATA_FOLDER['awa2'], transform=transform, filename=filename)
+    return d
 
+def cub(**kwargs):
+    transform = kwargs['transform']
+    filename = kwargs['filename']
+
+    d = CubDataset(DATA_FOLDER['cub'], transform=transform, filename=filename)
+    return d
+
+def sun(**kwargs):
+    transform = kwargs['transform']
+    filename = kwargs['filename']
+
+    d = SunDataset(DATA_FOLDER['sun'], transform=transform, filename=filename)
+    return d
+    
 def imagenet100(**kwargs):
     transform = kwargs['transform']
     filename = kwargs['filename']

@@ -39,7 +39,7 @@ losses = {
 datasets = {
     'class': ['imagenet100', 'nuswide', 'cifar10', 'imagenet50a', 'imagenet50b', 'cars', 'cifar10_II', 'landmark',
               'landmark200', 'landmark500', 'gldv2delgembed', 'roxford5kdelgembed', 'descriptor', 'sop',
-              'sop_instance', 'food101'],
+              'sop_instance', 'food101','awa2','cub','sun'],
     'multiclass': ['nuswide', 'coco', 'mirflickr'],
 }
 

@@ -68,7 +68,10 @@ def imagesize(config):
         'mirflickr': 256,
         'sop': 256,
         'sop_instance': 256,
-        'food101': 256
+        'food101': 256,
+        'awa2': 256,
+        'cub':256,
+        'sun':256
     }[dsname]
 
     return r
@@ -97,7 +100,10 @@ def cropsize(config):
         'mirflickr': 224,
         'sop': 224,
         'sop_instance': 224,
-        'food101': 224
+        'food101': 224,
+        'awa2': 224,
+        'cub':224,
+        'sun':224
     }[dsname]
 
     return r
@@ -124,7 +130,10 @@ def nclass(config):
         'mirflickr': 24,
         'sop': 12,
         'sop_instance': 22634,
-        'food101': 101
+        'food101': 101,
+        'awa2': 50,
+        'cub':200,
+        'sun':717
     }[dsname]
 
     return r
@@ -148,7 +157,10 @@ def R(config):
         'mirflickr': 1000,
         'sop': 1000,
         'sop_instance': 100,
-        'food101': 1000
+        'food101': 1000,
+        'awa2':32322,
+        'cub':5788,
+        'sun':7170
     }[config['dataset'] + {2: '_2'}.get(config['dataset_kwargs']['evaluation_protocol'], '')]
 
     return r
@@ -326,6 +338,43 @@ def dataset(config, filename, transform_mode,
                      dataset_name_suffix=config['dataset_kwargs'].get('dataset_name_suffix', ''),
                      ratio=data_ratio)
         logging.info(f'Augmentation for {transform_mode}: {transform.transforms}')
+
+    elif dataset_name in ['awa2']: 
+
+        if transform_mode == 'train':
+            transform = compose_transform('train', 0, crop, 2, [
+                transforms.RandomResizedCrop(crop),
+                transforms.RandomHorizontalFlip()
+            ])
+        else:
+            transform = compose_transform('test', resize, crop, 2)
+
+        d = datasets.awa2(transform=transform, filename=filename)
+
+
+    elif dataset_name in ['cub']:  
+
+        if transform_mode == 'train':
+            transform = compose_transform('train', 0, crop, 2, [
+                transforms.RandomResizedCrop(crop),
+                transforms.RandomHorizontalFlip()
+            ])
+        else:
+            transform = compose_transform('test', resize, crop, 2)
+
+        d = datasets.cub(transform=transform, filename=filename)
+
+    elif dataset_name in ['sun']:  
+
+        if transform_mode == 'train':
+            transform = compose_transform('train', 0, crop, 2, [
+                transforms.RandomResizedCrop(crop),
+                transforms.RandomHorizontalFlip()
+            ])
+        else:
+            transform = compose_transform('test', resize, crop, 2)
+
+        d = datasets.sun(transform=transform, filename=filename)
 
     elif dataset_name in ['cifar10', 'cifar100', 'cifar10_II']:  # cifar10/ cifar100
         resizec = 0 if resize == 32 else resize
