@@ -7,6 +7,55 @@ import torch.nn.functional as F
 from functions.loss.base_cls import BaseClassificationLoss
 
 
+# cvpr2021 clear those instances that have no positive instances to avoid training error
+class SupConLoss_clear(torch.nn.Module):
+    def __init__(self, temperature=10.0):
+        super(SupConLoss_clear, self).__init__()
+        self.temperature = temperature
+
+    def forward(self, features, labels):
+
+        device = (torch.device('cuda')
+                  if features.is_cuda
+                  else torch.device('cpu'))
+
+        batch_size = features.shape[0]
+        labels = labels.contiguous().view(-1, 1)
+        mask = torch.eq(labels, labels.T).float().to(device)
+
+        anchor_dot_contrast = torch.div(
+            torch.matmul(features, features.T),
+            self.temperature)
+
+        # normalize the logits for numerical stability
+        logits_max, _ = torch.max(anchor_dot_contrast, dim=1, keepdim=True)
+        logits = anchor_dot_contrast - logits_max.detach()
+
+        logits_mask = torch.scatter(
+            torch.ones_like(mask),
+            1,
+            torch.arange(batch_size).view(-1, 1).to(device),
+            0
+        )
+        mask = mask * logits_mask
+        single_samples = (mask.sum(1) == 0).float()
+
+        # compute log_prob
+        exp_logits = torch.exp(logits) * logits_mask
+        log_prob = logits - torch.log(exp_logits.sum(1, keepdim=True))
+
+        # compute mean of log-likelihood over positive
+        # invoid to devide the zero
+        mean_log_prob_pos = (mask * log_prob).sum(1) / (mask.sum(1)+single_samples)
+
+        # loss
+        # filter those single sample
+        loss = - mean_log_prob_pos*(1-single_samples)
+        loss = loss.sum()/(loss.shape[0]-single_samples.sum())
+
+        return loss
+
+
 class ADSHLoss(BaseClassificationLoss):
     def __init__(self, alpha=1, beta=1, s=10, m=0.2, multiclass=False, method='cosface', **kwargs):
         super().__init__()
@@ -20,11 +69,14 @@ class ADSHLoss(BaseClassificationLoss):
         self.multiclass = multiclass
         self.weight = None
 
+        # self.nclass = nclass
 
         #nips2020
         self.criterion = torch.nn.CrossEntropyLoss()
         self.criterion_regre = torch.nn.MSELoss()
 
+        #cvpr2021
+        self.contras_criterion = SupConLoss_clear()
 
     def get_hamming_distance(self):
         assert self.weight is not None, 'please set weights before calling this function'
@@ -112,8 +164,28 @@ class ADSHLoss(BaseClassificationLoss):
 
         return loss
 
+    def class_scores_for_loop(self, embed, input_label,attribute_seen, relation_net):
+        #cvpr2021 cls
+        cls_temp = 1.0
+        nclass_seen = self.nclass#这里seen应该是40，但是oneloss这个代码没有区分，这里还是直接用总的50，只是只有40类的数据，一样的
+        all_scores=torch.FloatTensor(embed.shape[0],nclass_seen).cuda()
+        for i, i_embed in enumerate(embed):
+            #print(i_embed.shape)
+            expand_embed = i_embed.repeat(nclass_seen, 1)#.reshape(embed.shape[0] * opt.nclass_seen, -1)
+            #print(expand_embed.shape, attribute_seen.shape)
+            all_scores[i]=(torch.div(relation_net(torch.cat((expand_embed, attribute_seen.t().float()), dim=1)),cls_temp).squeeze())
+        score_max, _ = torch.max(all_scores, dim=1, keepdim=True)
+        # normalize the scores for stable training
+        scores_norm = all_scores - score_max.detach()
+        mask = F.one_hot(input_label, num_classes=nclass_seen).float().cuda()
+        exp_scores = torch.exp(scores_norm)
+        log_scores = scores_norm - torch.log(exp_scores.sum(1, keepdim=True))
+        cls_loss = -((mask * log_scores).sum(1) / mask.sum(1)).mean()
+        return cls_loss
+
     def forward(self, logits, code_logits, labels, 
         pre_attri, pre_class,label_a,label_v,attention,middle_graph,
+        embed_real, outz_real,attr_data,Dis_Embed_Att,
         onehot=True):
         if self.multiclass:
             logits, labels = self.get_dynamic_logits(logits, code_logits, labels)
@@ -126,6 +198,14 @@ class ADSHLoss(BaseClassificationLoss):
         ### nips2020
         attr_w = 1#2for cub  0.5for awa2  2for sun
         self.attrloss = self.nips2020attrloss(pre_attri, pre_class,label_a,label_v,attention,middle_graph)
+
+        # ### cvpr2021
+        ins_w = 2#1for cub   0.2for awa2   4for sun
+        # cls_w = 0#1for cub   0.2for awa2   4for sun
+        real_ins_contras_loss = self.contras_criterion(outz_real, label_v)
+        if torch.isnan(real_ins_contras_loss):
+            real_ins_contras_loss = 0
+        # cls_loss_real = self.class_scores_for_loop(embed_real, label_v, attr_data, Dis_Embed_Att)
 
 
         margin_logits = self.get_margin_logits(logits, labels)
@@ -144,5 +224,6 @@ class ADSHLoss(BaseClassificationLoss):
         self.losses['meanhd'] = meanhd
         self.losses['varhd'] = varhd
 
-        loss = ce + self.alpha * meanhd + self.beta * varhd +attr_w*self.attrloss
+        loss = ce + self.alpha * meanhd + self.beta * varhd +attr_w*self.attrloss + \
+                ins_w*real_ins_contras_loss 
         return loss

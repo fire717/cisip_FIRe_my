@@ -36,6 +36,24 @@ class ArchOrthoHash(BaseArch):
         self.softmax = nn.Softmax(dim=1)
         self.attr_conv = nn.Conv2d(2048, n_attr, 1, 1) #2048 for resnet101
 
+        #2021CVPR CE-GZSL
+        resSize = 2048
+        embedSize = 2048
+        outzSize = 512
+        self.Embedding_Net_fc1 = nn.Sequential(
+                                nn.Linear(resSize, embedSize),
+                                nn.ReLU(True),
+                            )
+        self.Embedding_Net_fc2 = nn.Linear(embedSize, outzSize)
+        attSize = n_attr
+        nhF = 2048
+        self.Dis_Embed_Att = nn.Sequential(
+                                nn.Linear(embedSize+attSize, nhF),
+                                nn.LeakyReLU(0.2, True),
+                                nn.Linear(nhF, 1)
+                            )
+
+
     def get_features_params(self):
         return self.backbone.get_features_params()
 
@@ -50,6 +68,10 @@ class ArchOrthoHash(BaseArch):
         pre_attri = F.avg_pool2d(attention, kernel_size=7).view(features.shape[0], -1).double() #64,85
         pre_class = self.softmax(pre_attri.mm(attribute))#64x50
 
+        ### add 2021cvpr bracnch
+        embedding= self.Embedding_Net_fc1(x)
+        out_z = F.normalize(self.Embedding_Net_fc2(embedding), dim=1) #实例对比学习512维向量
+
         v = self.hash_fc(x)
         u = self.ce_fc(v)
-        return u, v, pre_attri, pre_class,attention
+        return u, v, pre_attri, pre_class,attention,embedding,out_z
