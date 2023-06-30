@@ -215,6 +215,7 @@ def prepare_dataloader(config,
                                         gpu_transform=gpu_transform,
                                         gpu_mean_transform=gpu_mean_transform,
                                         skip_preprocess=config['dataset_kwargs'].get('train_skip_preprocess', False))
+        attr_data = train_dataset.attr_data
         if dataset_type == 'rotation':
             logging.info('Using Rotation Dataset!')
             train_dataset = RotationDataset(train_dataset)
@@ -286,7 +287,7 @@ def prepare_dataloader(config,
                                    workers=workers,
                                    seed=seed)
 
-    return train_loader, test_loader, db_loader
+    return train_loader, test_loader, db_loader, attr_data
 
 
 def prepare_model(config, device: torch.device):

@@ -99,7 +99,7 @@ if __name__ == "__main__":
     parser.add_argument('--nbit', default=64, type=int, help='number of bits for hash codes')
     parser.add_argument('--bs', default=64, type=int, help='batch size')
     parser.add_argument('--maxbs', default=256, type=int, help='maximum batch size for testing, by default it is max(bs * 4, maxbs)')
-    parser.add_argument('--epochs', default=100, type=int, help='training epochs')
+    parser.add_argument('--epochs', default=10, type=int, help='training epochs')
     parser.add_argument('--arch', default='', type=str, help='architecture for the hash function')
     parser.add_argument('--gpu-transform', default=False, action='store_true')
     parser.add_argument('--gpu-mean-transform', default=False, action='store_true')
@@ -120,7 +120,7 @@ if __name__ == "__main__":
     parser.add_argument('--loss-params', default='', type=str)
 
     parser.add_argument('--device', default='cuda:0', type=str, help='torch.device(\'?\') cpu, cuda:x')
-    parser.add_argument('--eval', default=10, type=int, help='total evaluations throughout the training')
+    parser.add_argument('--eval', default=1, type=int, help='total evaluations throughout the training')
 
     # lr related
     parser.add_argument('--lr', default=0.0001, type=float, help='learning rate')

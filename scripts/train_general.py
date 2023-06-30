@@ -56,7 +56,8 @@ def backward_general(output, loss, optimizer,
 
 def get_output_and_loss_general(method, model, criterion,
                                 data, labels, index,
-                                onehot, stage, loss_name, loss_cfg, no_loss) -> Tuple[Dict, Any]:
+                                onehot, stage, loss_name, loss_cfg, no_loss,
+                                attr_data, label_a, label_v, middle_graph) -> Tuple[Dict, Any]:
     f = {
         'supervised': train_supervised.get_output_and_loss_supervised,
         'unsupervised': train_unsupervised.get_output_and_loss_unsupervised,
@@ -69,7 +70,8 @@ def get_output_and_loss_general(method, model, criterion,
     if f is None:
         raise NotImplementedError(f'Method {method} not implemented for get_output_and_loss_general')
 
-    return f(model, criterion, data, labels, index, onehot, loss_name, loss_cfg, stage, no_loss)
+    return f(model, criterion, data, labels, index, onehot, loss_name, loss_cfg, stage, no_loss,
+            attr_data, label_a, label_v, middle_graph)
 
 
 def update_meters_general(method, model, meters, out, labels, onehot, criterion, loss_name, loss_cfg):
@@ -123,6 +125,7 @@ def pre_epoch_operations(loss, **kwargs):
 
 
 def train_hashing(optimizer, model, train_loader, device, loss_name, loss_cfg, onehot,
+                   attr_data, middle_graph,
                   gpu_train_transform=None, method='supervised', criterion=None, logdir=None):
     model.train()
 
@@ -142,6 +145,9 @@ def train_hashing(optimizer, model, train_loader, device, loss_name, loss_cfg, o
 
     running_times = []
 
+    #2020nips
+    attr_data = torch.from_numpy(attr_data).to(device).t()
+
     for i, batch in enumerate(pbar):
         if isinstance(optimizer, list):
             for opt in optimizer:
@@ -159,6 +165,11 @@ def train_hashing(optimizer, model, train_loader, device, loss_name, loss_cfg, o
             else:
                 data = gpu_train_transform(data)
 
+
+        #2020nips
+        label_v = torch.argmax(labels,axis=1)
+        label_a = attr_data[:, label_v].t()
+
         if len(batch) == 6:  # it is a neighbor dataset
             ndata, nlabels, nindex = batch[3:]
             if gpu_train_transform is not None:
@@ -169,7 +180,8 @@ def train_hashing(optimizer, model, train_loader, device, loss_name, loss_cfg, o
 
         output, loss = get_output_and_loss_general(method, model, criterion,
                                                    data, labels, index,
-                                                   onehot, 'train', loss_name, loss_cfg, no_loss=False)
+                                                   onehot, 'train', loss_name, loss_cfg, False,
+                                                   attr_data, label_a, label_v, middle_graph)
         backward_general(output, loss, optimizer,
                          method, model, criterion,
                          data, labels, index,
@@ -200,7 +212,9 @@ def train_hashing(optimizer, model, train_loader, device, loss_name, loss_cfg, o
     return meters
 
 
-def test_hashing(model, test_loader, device, loss_name, loss_cfg, onehot, return_codes=False,
+def test_hashing(model, test_loader, device, loss_name, loss_cfg, onehot, 
+                attr_data, middle_graph,
+                return_codes=False,
                  return_id=False, gpu_test_transform=None, method='supervised', criterion=None, no_loss=False):
     model.eval()
 
@@ -224,6 +238,9 @@ def test_hashing(model, test_loader, device, loss_name, loss_cfg, onehot, return
 
     running_times = []
 
+    #2020nips
+    attr_data = torch.from_numpy(attr_data).to(device).t()
+
     for i, batch in enumerate(pbar):
         with torch.no_grad():
             data, labels, index = batch[:3]
@@ -231,6 +248,10 @@ def test_hashing(model, test_loader, device, loss_name, loss_cfg, onehot, return
 
             if gpu_test_transform is not None:
                 data = gpu_test_transform(data)
+
+            #2020nips
+            label_v = torch.argmax(labels,axis=1)
+            label_a = attr_data[:, label_v].t()
 
             if len(batch) == 6:  # it is a neighbor dataset
                 ndata, nlabels, nindex = batch[3:]
@@ -241,7 +262,8 @@ def test_hashing(model, test_loader, device, loss_name, loss_cfg, onehot, return
                 index = (index, nindex)
             output, loss = get_output_and_loss_general(method, model, criterion,
                                                        data, labels, index,
-                                                       onehot, 'test', loss_name, loss_cfg, no_loss)
+                                                       onehot, 'test', loss_name, loss_cfg, no_loss,
+                                                        attr_data, label_a, label_v, middle_graph)
             batchtimer.toc()
             running_times.append(batchtimer.total)
 
@@ -361,6 +383,25 @@ def load_model(model, config):
         logging.info(f'{msg}')
 
 
+def get_middle_graph(weight_cpt, model):
+    middle_graph = None
+    if weight_cpt > 0:
+        # creat middle_graph to mask the L_CPT:
+        kernel_size = 7#model.kernel_size[model.extract[0]]
+        raw_graph = torch.zeros((2 * kernel_size - 1, 2 * kernel_size - 1))
+        for x in range(- kernel_size + 1, kernel_size):
+            for y in range(- kernel_size + 1, kernel_size):
+                raw_graph[x + (kernel_size - 1), y + (kernel_size - 1)] = x ** 2 + y ** 2
+        middle_graph = torch.zeros((kernel_size ** 2, kernel_size, kernel_size))
+        for x in range(kernel_size):
+            for y in range(kernel_size):
+                middle_graph[x * kernel_size + y, :, :] = \
+                    raw_graph[kernel_size - 1 - x: 2 * kernel_size - 1 - x,
+                    kernel_size - 1 - y: 2 * kernel_size - 1 - y]
+        middle_graph = middle_graph.cuda()
+    return middle_graph
+
+
 def main(config, gpu_transform=False, gpu_mean_transform=False, method='supervised'):
     benchmark = config['benchmark']
     if benchmark:
@@ -404,7 +445,7 @@ def main(config, gpu_transform=False, gpu_mean_transform=False, method='supervis
 
     ##### dataset preparation #####
     workers = 1 if config['dataset'] in ['gldv2delgembed'] else config['num_worker']
-    train_loader, test_loader, db_loader = prepare_dataloader(config,
+    train_loader, test_loader, db_loader,attr_data = prepare_dataloader(config,
                                                               gpu_transform=gpu_transform,
                                                               gpu_mean_transform=gpu_mean_transform,
                                                               workers=workers, seed=config['seed'])
@@ -485,6 +526,12 @@ def main(config, gpu_transform=False, gpu_mean_transform=False, method='supervis
     nepochs = config['epochs']
     neval = config['eval_interval']
 
+
+    # nips2020
+    cpt = 2e-9
+    middle_graph = get_middle_graph(cpt, model)
+
+
     ##### pre-training operations #####
     prepare_dataset_from_model(model, criterion, config,
                                train_loader, test_loader, db_loader)
@@ -506,6 +553,7 @@ def main(config, gpu_transform=False, gpu_mean_transform=False, method='supervis
         ##### train for an epoch #####
         train_meters = train_hashing(optimizer, model, train_loader, device, loss_param['loss'],
                                      loss_param['loss_param'], onehot=onehot,
+                                     attr_data=attr_data, middle_graph=middle_graph,
                                      gpu_train_transform=gpu_train_transform,
                                      method=method, criterion=criterion, logdir=logdir)
 
@@ -552,11 +600,13 @@ def main(config, gpu_transform=False, gpu_mean_transform=False, method='supervis
             ##### obtain testing and database codes and statistics #####
             test_meters, test_out = test_hashing(model, test_loader, device, loss_param['loss'],
                                                  loss_param['loss_param'], onehot=onehot,
+                                                 attr_data=attr_data, middle_graph=middle_graph,
                                                  return_codes=True, return_id=calculate_mAP_using_id,
                                                  gpu_test_transform=gpu_test_transform, method=method,
                                                  criterion=criterion, no_loss=benchmark)
             db_meters, db_out = test_hashing(model, db_loader, device, loss_param['loss'],
                                              loss_param['loss_param'], onehot=onehot,
+                                             attr_data=attr_data, middle_graph=middle_graph,
                                              return_codes=True, return_id=calculate_mAP_using_id,
                                              gpu_test_transform=gpu_test_transform, method=method,
                                              criterion=criterion, no_loss=benchmark)
@@ -620,6 +670,7 @@ def main(config, gpu_transform=False, gpu_mean_transform=False, method='supervis
                                               seed=config['seed'])
                 _, train_out = test_hashing(model, train_loader, device, loss_param['loss'],
                                             loss_param['loss_param'], onehot=onehot,
+                                            attr_data=attr_data, middle_graph=middle_graph,
                                             return_codes=True, return_id=calculate_mAP_using_id,
                                             gpu_test_transform=gpu_test_transform, method=method,
                                             criterion=criterion)

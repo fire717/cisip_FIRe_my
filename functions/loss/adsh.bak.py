@@ -20,12 +20,6 @@ class ADSHLoss(BaseClassificationLoss):
         self.multiclass = multiclass
         self.weight = None
 
-
-        #nips2020
-        self.criterion = torch.nn.CrossEntropyLoss()
-        self.criterion_regre = torch.nn.MSELoss()
-
-
     def get_hamming_distance(self):
         assert self.weight is not None, 'please set weights before calling this function'
 
@@ -87,46 +81,13 @@ class ADSHLoss(BaseClassificationLoss):
         new_logits = torch.cat([logits, new_logits], dim=1)
         return new_logits, new_labels
 
-    def nips2020attrloss(self,pre_attri, pre_class,label_a,label_v,attention,middle_graph):
-        #xe 1 --attri 1e-4   regular 0.0005
-        #l_xe 0 --l_attri 1e-2 --l_regular 0.5e-6
-        #cpt 2e-9
-        xe = 1
-        attri = 1e-4
-        cpt = 2e-9
-        loss = 0
-        if xe > 0:
-            loss_xe = xe * self.criterion(pre_class, label_v)
-            loss = loss_xe
-
-        if attri > 0:
-            loss_attri = attri * self.criterion_regre(pre_attri, label_a)
-            loss += loss_attri
-
-        if cpt > 0:
-            batch_size, attri_dim, map_dim, map_dim = attention.size()
-            peak_id = torch.argmax(attention.view(batch_size * attri_dim, -1), dim=1)
-            peak_mask = middle_graph[peak_id, :, :].view(batch_size, attri_dim, map_dim, map_dim)
-            cpt_loss = cpt * torch.sum(torch.sigmoid(attention) * peak_mask)
-            loss += cpt_loss
-
-        return loss
-
-    def forward(self, logits, code_logits, labels, 
-        pre_attri, pre_class,label_a,label_v,attention,middle_graph,
-        onehot=True):
+    def forward(self, logits, code_logits, labels, onehot=True):
         if self.multiclass:
             logits, labels = self.get_dynamic_logits(logits, code_logits, labels)
             labels = labels.argmax(1)
         else:
             if onehot:
                 labels = labels.argmax(1)
-
-
-        ### nips2020
-        attr_w = 1#2for cub  0.5for awa2  2for sun
-        self.attrloss = self.nips2020attrloss(pre_attri, pre_class,label_a,label_v,attention,middle_graph)
-
 
         margin_logits = self.get_margin_logits(logits, labels)
         ce = F.cross_entropy(margin_logits, labels)
@@ -144,5 +105,5 @@ class ADSHLoss(BaseClassificationLoss):
         self.losses['meanhd'] = meanhd
         self.losses['varhd'] = varhd
 
-        loss = ce + self.alpha * meanhd + self.beta * varhd +attr_w*self.attrloss
+        loss = ce + self.alpha * meanhd + self.beta * varhd
         return loss

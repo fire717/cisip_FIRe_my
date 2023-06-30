@@ -165,10 +165,17 @@ def R(config):
 
     return r
 
+def nattr(config):
+    r = {
+        'awa2': 85,
+        'cub':312,
+        'sun':102
+    }[config['dataset']]
+    return r
 
 def arch(config, **kwargs):
     if config['arch'] in models.network_names:
-        net = models.network_names[config['arch']](config, **kwargs)
+        net = models.network_names[config['arch']](config,n_attr=nattr(config), **kwargs)
     else:
         raise ValueError(f'Invalid Arch: {config["arch"]}')
 
