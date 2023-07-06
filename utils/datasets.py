@@ -309,7 +309,7 @@ class AwA2Dataset(Dataset):
         if self.transform is not None:
             img = self.transform(img)
         #print("2222",img.shape)
-        return img, target, self.train_data[index]
+        return img, target, index, self.train_data[index]
 
     def __len__(self):
         return len(self.train_data)
@@ -424,7 +424,7 @@ class CubDataset(Dataset):
         if self.transform is not None:
             img = self.transform(img)
         #print("2222",img.shape)
-        return img, target, self.train_data[index]
+        return img, target, index, self.train_data[index]
 
     def __len__(self):
         return len(self.train_data)
@@ -546,7 +546,7 @@ class SunDataset(Dataset):
         if self.transform is not None:
             img = self.transform(img)
         #print("2222",img.shape)
-        return img, target, self.train_data[index]
+        return img, target, index, self.train_data[index]
 
     def __len__(self):
         return len(self.train_data)

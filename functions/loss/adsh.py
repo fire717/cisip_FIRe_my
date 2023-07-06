@@ -3,7 +3,7 @@ import logging
 
 import torch
 import torch.nn.functional as F
-
+from torch.autograd import Function
 from functions.loss.base_cls import BaseClassificationLoss
 
 
@@ -56,6 +56,87 @@ class SupConLoss_clear(torch.nn.Module):
         return loss
 
 
+# ijcai21
+class hash(Function):
+    @staticmethod
+    def forward(ctx, input):
+        # ctx.save_for_backward(input)
+        return torch.sign(input)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        # input,  = ctx.saved_tensors
+        # grad_output = grad_output.data
+
+        return grad_output
+
+def hash_layer(input):
+    return hash.apply(input)
+
+# ijcai21
+class NtXentLoss(torch.nn.Module):
+    def __init__(self, batch_size, temperature):
+        super(NtXentLoss, self).__init__()
+        #self.batch_size = batch_size
+        self.temperature = temperature
+        #self.device = device
+
+        #self.mask = self.mask_correlated_samples(batch_size)
+        self.similarityF = torch.nn.CosineSimilarity(dim = 2)
+        self.criterion = torch.nn.CrossEntropyLoss(reduction = 'sum')
+    
+
+    def mask_correlated_samples(self, batch_size):
+        N = 2 * batch_size 
+        mask = torch.ones((N, N), dtype=bool)
+        mask = mask.fill_diagonal_(0)
+        for i in range(batch_size):
+            mask[i, batch_size + i] = 0
+            mask[batch_size + i, i] = 0
+        return mask
+    
+
+    def forward(self, z_i, z_j, device):
+        """
+        We do not sample negative examples explicitly.
+        Instead, given a positive pair, similar to (Chen et al., 2017), we treat the other 2(N − 1) augmented examples within a minibatch as negative examples.
+        """
+        batch_size = z_i.shape[0]
+        N = 2 * batch_size
+
+        z = torch.cat((z_i, z_j), dim=0)
+
+        sim = self.similarityF(z.unsqueeze(1), z.unsqueeze(0)) / self.temperature
+        #sim = 0.5 * (z_i.shape[1] - torch.tensordot(z.unsqueeze(1), z.T.unsqueeze(0), dims = 2)) / z_i.shape[1] / self.temperature
+
+        sim_i_j = torch.diag(sim, batch_size )
+        sim_j_i = torch.diag(sim, -batch_size )
+        
+        mask = self.mask_correlated_samples(batch_size)
+        positive_samples = torch.cat((sim_i_j, sim_j_i), dim=0).view(N, 1)
+        negative_samples = sim[mask].view(N, -1)
+
+        labels = torch.zeros(N).to(device).long()
+        logits = torch.cat((positive_samples, negative_samples), dim=1)
+        loss = self.criterion(logits, labels)
+        loss /= N
+        return loss
+
+#ECCV2022 SEMICON 
+class ADSH_Loss(torch.nn.Module):
+    
+    def __init__(self, code_length, gamma=200):
+        super(ADSH_Loss, self).__init__()
+        self.code_length = code_length
+        self.gamma = gamma
+
+    def forward(self, F, B, S, omega):
+        hash_loss = ((self.code_length * S - F @ B.t()) ** 2).sum() / (F.shape[0] * B.shape[0]) / self.code_length * 12
+        quantization_loss = ((F - B[omega, :]) ** 2).sum() / (F.shape[0] * B.shape[0]) * self.gamma / self.code_length * 12
+
+        loss = hash_loss + quantization_loss
+        return loss, hash_loss, quantization_loss
+
 class ADSHLoss(BaseClassificationLoss):
     def __init__(self, alpha=1, beta=1, s=10, m=0.2, multiclass=False, method='cosface', **kwargs):
         super().__init__()
@@ -77,6 +158,14 @@ class ADSHLoss(BaseClassificationLoss):
 
         #cvpr2021
         self.contras_criterion = SupConLoss_clear()
+
+        #ijcai21
+        batch_size = 64
+        temperature = 0.3
+        self.criterion_ijcai21 = NtXentLoss(batch_size, temperature)
+
+
+        self.criterion_eccv2022_semicon = ADSH_Loss(code_length=64)
 
     def get_hamming_distance(self):
         assert self.weight is not None, 'please set weights before calling this function'
@@ -164,6 +253,44 @@ class ADSHLoss(BaseClassificationLoss):
 
         return loss
 
+    def compute_kl(self, prob, prob_v):
+        #for ijcai21loss
+        prob_v = prob_v.detach()
+        # prob = prob.detach()
+
+        kl = prob * (torch.log(prob + 1e-8) - torch.log(prob_v + 1e-8)) + (1 - prob) * (torch.log(1 - prob + 1e-8 ) - torch.log(1 - prob_v + 1e-8))
+        kl = torch.mean(torch.sum(kl, axis = 1))
+        return kl
+
+    def ijcai21loss(self, code_logits, label_v):
+        #print(code_logits.shape, label_v.shape)[64, 64]) torch.Size([64]
+        #print(label_v)
+        #获取次数大于1的类别
+        unique_tensor, counts = torch.unique(label_v, return_counts=True)
+        repeated_indices = torch.where(counts > 1)[0]
+        repeated_elements = unique_tensor[repeated_indices]
+        #print(repeated_elements)
+        loss_all = 0
+        for cid in range(len(repeated_elements)):
+            same_codes = code_logits[label_v==repeated_elements[cid]]
+            
+            prob_i = torch.sigmoid(same_codes[0]).unsqueeze(0)
+            z_i = hash_layer(prob_i - 0.5)
+
+            for jid in range(1,len(same_codes)):
+                prob_j = torch.sigmoid(same_codes[jid]).unsqueeze(0)
+                z_j = hash_layer(prob_j - 0.5)
+
+                kl_loss = (self.compute_kl(prob_i, prob_j) + self.compute_kl(prob_j, prob_i)) / 2
+                contra_loss = self.criterion_ijcai21(z_i, z_j, code_logits.device)
+                #print(self.hparams.weight) 0.001
+                weight = 0.001
+                loss = contra_loss + weight * kl_loss
+                loss_all += loss
+
+        return loss_all
+
+
     def class_scores_for_loop(self, embed, input_label,attribute_seen, relation_net):
         #cvpr2021 cls
         cls_temp = 1.0
@@ -186,6 +313,7 @@ class ADSHLoss(BaseClassificationLoss):
     def forward(self, logits, code_logits, labels, 
         pre_attri, pre_class,label_a,label_v,attention,middle_graph,
         embed_real, outz_real,attr_data,Dis_Embed_Att,
+        B=None, S=None, omega=None,
         onehot=True):
         if self.multiclass:
             logits, labels = self.get_dynamic_logits(logits, code_logits, labels)
@@ -208,6 +336,18 @@ class ADSHLoss(BaseClassificationLoss):
         # cls_loss_real = self.class_scores_for_loop(embed_real, label_v, attr_data, Dis_Embed_Att)
 
 
+        # ### IJCAI21
+        icjai_w = 6#0.1for cub   0.1for awa2   6for sun
+        icjai21loss = self.ijcai21loss(code_logits, label_v)
+
+
+        # ### ECCV2022
+        adsh_w = 0.1 #0.3#1for cub    1for awa2   for sun
+        adsh_loss = 0 
+        if B is not None:
+            adsh_loss, _, _ = self.criterion_eccv2022_semicon(code_logits, B, S, omega)
+
+
         margin_logits = self.get_margin_logits(logits, labels)
         ce = F.cross_entropy(margin_logits, labels)
 
@@ -225,5 +365,8 @@ class ADSHLoss(BaseClassificationLoss):
         self.losses['varhd'] = varhd
 
         loss = ce + self.alpha * meanhd + self.beta * varhd +attr_w*self.attrloss + \
-                ins_w*real_ins_contras_loss 
+                ins_w*real_ins_contras_loss + \
+                icjai_w*icjai21loss + \
+                adsh_w*adsh_loss
+
         return loss

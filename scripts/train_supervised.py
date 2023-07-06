@@ -4,7 +4,8 @@ from functions.hashing import get_hamm_dist
 
 
 def get_output_and_loss_supervised(model, criterion, data, labels, index, onehot, 
-                    loss_name, loss_cfg, stage, no_loss, attr_data, label_a, label_v, middle_graph):
+                    loss_name, loss_cfg, stage, no_loss, attr_data, label_a, label_v, middle_graph,
+                    B,S,omega):
     #logits, code_logits = model(data)[:2]
     logits, code_logits, pre_attri, pre_class,attention,embed_real, outz_real = model(data, attr_data)
     if no_loss:
@@ -13,6 +14,7 @@ def get_output_and_loss_supervised(model, criterion, data, labels, index, onehot
         loss = criterion(logits, code_logits, labels, 
                     pre_attri, pre_class,label_a,label_v,attention,middle_graph,
                     embed_real, outz_real, attr_data, model.Dis_Embed_Att,
+                    B,S,omega,
                     onehot=onehot)
     return {
                'logits': logits,

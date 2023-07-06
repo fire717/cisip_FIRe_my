@@ -57,7 +57,8 @@ def backward_general(output, loss, optimizer,
 def get_output_and_loss_general(method, model, criterion,
                                 data, labels, index,
                                 onehot, stage, loss_name, loss_cfg, no_loss,
-                                attr_data, label_a, label_v, middle_graph) -> Tuple[Dict, Any]:
+                                attr_data, label_a, label_v, middle_graph,
+                                B=None, S=None, omega=None) -> Tuple[Dict, Any]:
     f = {
         'supervised': train_supervised.get_output_and_loss_supervised,
         'unsupervised': train_unsupervised.get_output_and_loss_unsupervised,
@@ -71,7 +72,7 @@ def get_output_and_loss_general(method, model, criterion,
         raise NotImplementedError(f'Method {method} not implemented for get_output_and_loss_general')
 
     return f(model, criterion, data, labels, index, onehot, loss_name, loss_cfg, stage, no_loss,
-            attr_data, label_a, label_v, middle_graph)
+            attr_data, label_a, label_v, middle_graph,B,S,omega)
 
 
 def update_meters_general(method, model, meters, out, labels, onehot, criterion, loss_name, loss_cfg):
@@ -126,6 +127,7 @@ def pre_epoch_operations(loss, **kwargs):
 
 def train_hashing(optimizer, model, train_loader, device, loss_name, loss_cfg, onehot,
                    attr_data, middle_graph,
+                   B,S,train_paths,
                   gpu_train_transform=None, method='supervised', criterion=None, logdir=None):
     model.train()
 
@@ -148,6 +150,9 @@ def train_hashing(optimizer, model, train_loader, device, loss_name, loss_cfg, o
     #2020nips
     attr_data = torch.from_numpy(attr_data).to(device).t()
 
+    #eccv20
+    total_img_indexes = []
+
     for i, batch in enumerate(pbar):
         if isinstance(optimizer, list):
             for opt in optimizer:
@@ -157,7 +162,8 @@ def train_hashing(optimizer, model, train_loader, device, loss_name, loss_cfg, o
 
         # print(len(batch),batch)
         # bb
-        data, labels, index = batch[:3]
+        data, labels, index, img_paths= batch[:4]
+        #total_img_paths.extend(img_paths)
         data, labels = data.to(device), labels.to(device)
         if gpu_train_transform is not None:
             if len(data.shape) == 5:
@@ -178,17 +184,21 @@ def train_hashing(optimizer, model, train_loader, device, loss_name, loss_cfg, o
             labels = (labels, nlabels)
             index = (index, nindex)
 
+        indexes = [train_paths.tolist().index(img_path) for img_path in img_paths]
+        total_img_indexes.extend(indexes)
         output, loss = get_output_and_loss_general(method, model, criterion,
                                                    data, labels, index,
                                                    onehot, 'train', loss_name, loss_cfg, False,
-                                                   attr_data, label_a, label_v, middle_graph)
+                                                   attr_data, label_a, label_v, middle_graph,                 
+                                                    B, S[indexes, :], indexes)
         backward_general(output, loss, optimizer,
                          method, model, criterion,
                          data, labels, index,
                          onehot, 'train', loss_name, loss_cfg)
         batch_timer.toc()
 
-        update_meters_general(method, model, meters, output, labels, onehot, criterion, loss_name, loss_cfg)
+        update_meters_general(method, model, meters, output, labels, onehot, criterion, 
+                                loss_name, loss_cfg)
         criterion.losses.clear()  # clear the key in losses
 
         meters['loss'].update(loss.item())
@@ -209,7 +219,7 @@ def train_hashing(optimizer, model, train_loader, device, loss_name, loss_cfg, o
     mean_time = f"time_mean={np.mean(running_times[1:]):.5f}"
     logging.info(f'{"; ".join([f"{key}={val.avg:.4f}" for key, val in meters.items()] + [mean_time, std_time])}')
 
-    return meters
+    return meters,total_img_indexes
 
 
 def test_hashing(model, test_loader, device, loss_name, loss_cfg, onehot, 
@@ -402,6 +412,23 @@ def get_middle_graph(weight_cpt, model):
     return middle_graph
 
 
+
+def solve_dcc(B, U, expand_U, S, code_length, gamma):
+    """
+    Solve DCC problem.
+    """
+    Q = (code_length * S).t() @ U + gamma * expand_U
+
+    for bit in range(code_length):
+        q = Q[:, bit]
+        u = U[:, bit]
+        B_prime = torch.cat((B[:, :bit], B[:, bit+1:]), dim=1)
+        U_prime = torch.cat((U[:, :bit], U[:, bit+1:]), dim=1)
+
+        B[:, bit] = (q.t() - B_prime @ U_prime.t() @ u.t()).sign()
+
+    return B
+
 def main(config, gpu_transform=False, gpu_mean_transform=False, method='supervised'):
     benchmark = config['benchmark']
     if benchmark:
@@ -445,11 +472,14 @@ def main(config, gpu_transform=False, gpu_mean_transform=False, method='supervis
 
     ##### dataset preparation #####
     workers = 1 if config['dataset'] in ['gldv2delgembed'] else config['num_worker']
-    train_loader, test_loader, db_loader,attr_data = prepare_dataloader(config,
+    train_loader, test_loader, db_loader,attr_data,train_labels,num_train,train_paths = prepare_dataloader(config,
                                                               gpu_transform=gpu_transform,
                                                               gpu_mean_transform=gpu_mean_transform,
                                                               workers=workers, seed=config['seed'])
-
+    # sample_index = np.array([i for i in range(len(train_paths))])
+    # print(len(train_paths))
+    #bb
+    #print("-=-=-=-= : ", train_paths[:3])
     ##### model preparation #####
     model = prepare_model(config, device)
     logging.info(model)
@@ -527,165 +557,199 @@ def main(config, gpu_transform=False, gpu_mean_transform=False, method='supervis
     neval = config['eval_interval']
 
 
-    # nips2020
+    ### nips2020
     cpt = 2e-9
     middle_graph = get_middle_graph(cpt, model)
 
+    ###for eccv2022
+    num_retrieval = num_train #len = train data 4000
+    code_length = nbit #64
+    U = torch.zeros(num_train, code_length).to(device)
+    B = torch.randn(num_retrieval, code_length).to(device)#每个初始化满足标准正态分布
+    retrieval_targets = torch.from_numpy(train_labels).to(device)
+    S = (retrieval_targets @ retrieval_targets.t() > 0).float() #num samples * train num
+    #print(S, S.shape) [2000, 5994] 代表这2000条数据分别对应5994的每一条类别是否一样
+    #print(S.sum()) #59944
+    S = torch.where(S == 1, torch.full_like(S, 1), torch.full_like(S, -1))
+    #print(S) 把0 1的改为-1  1
+    # Soft similarity matrix, benefit to converge
+    r = S.sum() / (1 - S).sum() #-198/398
+    #print(S.sum() , (1 - S).sum(),r)
+    # print(r)
+    S = S * (1 + r) - r   #最大值还是1不变，最小的-1变为-1-2r
 
-    ##### pre-training operations #####
-    prepare_dataset_from_model(model, criterion, config,
-                               train_loader, test_loader, db_loader)
 
-    for ep in range(config['start_epoch_from'], nepochs):
-        ##### clean up and print message #####
-        if isinstance(scheduler, list):
-            logging.info(f'Epoch [{ep + 1}/{nepochs}] LR: {scheduler[0].get_last_lr()[-1]:.6f}')
-        else:
-            logging.info(f'Epoch [{ep + 1}/{nepochs}] LR: {scheduler.get_last_lr()[-1]:.6f}')
-        res = {'ep': ep + 1}
-        gc.collect()
-        # torch.cuda.empty_cache()
+    niters = 5#6
+    for it in range(niters):
 
-        ##### pre-epoch operations #####
-        pre_epoch_operations(loss_param['loss'], loss_param=loss_param, ep=ep,
-                             config=config, model=model, criterion=criterion, loader=train_loader)
+        train_loader, test_loader, db_loader,attr_data,train_labels,num_train,train_paths = prepare_dataloader(config,
+                                                              gpu_transform=gpu_transform,
+                                                              gpu_mean_transform=gpu_mean_transform,
+                                                              workers=workers, seed=config['seed'])
+        ##### pre-training operations #####
+        prepare_dataset_from_model(model, criterion, config,
+                                   train_loader, test_loader, db_loader)
 
-        ##### train for an epoch #####
-        train_meters = train_hashing(optimizer, model, train_loader, device, loss_param['loss'],
-                                     loss_param['loss_param'], onehot=onehot,
-                                     attr_data=attr_data, middle_graph=middle_graph,
-                                     gpu_train_transform=gpu_train_transform,
-                                     method=method, criterion=criterion, logdir=logdir)
-
-        ##### scheduler #####
-        if isinstance(scheduler, list):
-            for sch in scheduler:
-                sch.step()
-        else:
-            scheduler.step()
-
-        ##### store meters #####
-        for key in train_meters: res['train_' + key] = train_meters[key].avg
-        train_history.append(res)
-
-        if config['wandb_enable']:
-            wandb_train = res.copy()
-            wandb_train.pop("ep")
-            wandb.log(wandb_train, step=res['ep'])
-
-        ##### model saving #####
-        modelsd = model.state_dict()
-        if config['save_checkpoint']:
-            if isinstance(optimizer, list):
-                optim_sd = [opt.state_dict() for opt in optimizer]
-                scheduler_sd = [sch.state_dict() for sch in scheduler]
+    
+        print("--------- ECCV22 SEMICON Iter：%d/%d " % (it+1,niters))
+        for ep in range(config['start_epoch_from'], nepochs):
+            ##### clean up and print message #####
+            if isinstance(scheduler, list):
+                logging.info(f'Epoch [{ep + 1}/{nepochs}] LR: {scheduler[0].get_last_lr()[-1]:.6f}')
             else:
-                optim_sd = optimizer.state_dict()
-                scheduler_sd = scheduler.state_dict()
-
-            io.fast_save({
-                'model': modelsd,
-                'optimizer': optim_sd,
-                'scheduler': scheduler_sd,
-                'criterion': criterion,
-                'epoch': ep
-            }, f'{logdir}/checkpoint.pth')
-
-        ##### evaluation #####
-        is_last = (ep + 1) == nepochs
-        eval_now = is_last or (neval != 0 and (ep + 1) % neval == 0)
-        if eval_now:
+                logging.info(f'Epoch [{ep + 1}/{nepochs}] LR: {scheduler.get_last_lr()[-1]:.6f}')
             res = {'ep': ep + 1}
+            gc.collect()
+            # torch.cuda.empty_cache()
 
-            ##### obtain testing and database codes and statistics #####
-            test_meters, test_out = test_hashing(model, test_loader, device, loss_param['loss'],
+            ##### pre-epoch operations #####
+            pre_epoch_operations(loss_param['loss'], loss_param=loss_param, ep=ep,
+                                 config=config, model=model, criterion=criterion, loader=train_loader)
+
+            ##### train for an epoch #####
+            train_meters,total_img_indexes = train_hashing(optimizer, model, train_loader, device, loss_param['loss'],
+                                         loss_param['loss_param'], onehot=onehot,
+                                         attr_data=attr_data, middle_graph=middle_graph,
+                                         B=B,S=S,train_paths=train_paths,
+                                         gpu_train_transform=gpu_train_transform,
+                                         method=method, criterion=criterion, logdir=logdir)
+            #print(len(total_img_paths))
+            #sample_index = np.array([train_paths.tolist().index(img_path) for img_path in total_img_paths])
+            ##### scheduler #####
+            if isinstance(scheduler, list):
+                for sch in scheduler:
+                    sch.step()
+            else:
+                scheduler.step()
+
+            ##### store meters #####
+            for key in train_meters: res['train_' + key] = train_meters[key].avg
+            train_history.append(res)
+
+            if config['wandb_enable']:
+                wandb_train = res.copy()
+                wandb_train.pop("ep")
+                wandb.log(wandb_train, step=res['ep'])
+
+            ##### model saving #####
+            modelsd = model.state_dict()
+            if config['save_checkpoint']:
+                if isinstance(optimizer, list):
+                    optim_sd = [opt.state_dict() for opt in optimizer]
+                    scheduler_sd = [sch.state_dict() for sch in scheduler]
+                else:
+                    optim_sd = optimizer.state_dict()
+                    scheduler_sd = scheduler.state_dict()
+
+                io.fast_save({
+                    'model': modelsd,
+                    'optimizer': optim_sd,
+                    'scheduler': scheduler_sd,
+                    'criterion': criterion,
+                    'epoch': ep
+                }, f'{logdir}/checkpoint.pth')
+
+            ##### evaluation #####
+            is_last = (ep + 1) == nepochs
+            eval_now = is_last or (neval != 0 and (ep + 1) % neval == 0)
+            if eval_now:
+                res = {'ep': ep + 1}
+
+                ##### obtain testing and database codes and statistics #####
+                test_meters, test_out = test_hashing(model, test_loader, device, loss_param['loss'],
+                                                     loss_param['loss_param'], onehot=onehot,
+                                                     attr_data=attr_data, middle_graph=middle_graph,
+                                                     return_codes=True, return_id=calculate_mAP_using_id,
+                                                     gpu_test_transform=gpu_test_transform, method=method,
+                                                     criterion=criterion, no_loss=benchmark)
+                db_meters, db_out = test_hashing(model, db_loader, device, loss_param['loss'],
                                                  loss_param['loss_param'], onehot=onehot,
                                                  attr_data=attr_data, middle_graph=middle_graph,
                                                  return_codes=True, return_id=calculate_mAP_using_id,
                                                  gpu_test_transform=gpu_test_transform, method=method,
                                                  criterion=criterion, no_loss=benchmark)
-            db_meters, db_out = test_hashing(model, db_loader, device, loss_param['loss'],
-                                             loss_param['loss_param'], onehot=onehot,
-                                             attr_data=attr_data, middle_graph=middle_graph,
-                                             return_codes=True, return_id=calculate_mAP_using_id,
-                                             gpu_test_transform=gpu_test_transform, method=method,
-                                             criterion=criterion, no_loss=benchmark)
-            for key in test_meters: res['test_' + key] = test_meters[key].avg
-            for key in db_meters: res['db_' + key] = db_meters[key].avg
+                for key in test_meters: res['test_' + key] = test_meters[key].avg
+                for key in db_meters: res['db_' + key] = db_meters[key].avg
 
-            map_device = device
-            if db_out['codes'].numel() > 400000000:
-                db_out['codes'] = db_out['codes'].cpu()
-                test_out['codes'] = test_out['codes'].cpu()
-                map_device = torch.device('cpu')
+                map_device = device
+                if db_out['codes'].numel() > 400000000:
+                    db_out['codes'] = db_out['codes'].cpu()
+                    test_out['codes'] = test_out['codes'].cpu()
+                    map_device = torch.device('cpu')
 
-            ##### compute mAP #####
-            res['mAP'] = calculate_mAP(db_out['codes'], db_out['labels'],
-                                       test_out['codes'], test_out['labels'],
-                                       loss_param['R'], device=map_device, onehot=onehot,
-                                       using_id=calculate_mAP_using_id,
-                                       ground_truth=ground_truth if calculate_mAP_using_id else None,
-                                       db_id=db_out['id'] if calculate_mAP_using_id else None,
-                                       test_id=test_out['id'] if calculate_mAP_using_id else None,
-                                       shuffle_database=config['shuffle_database'],
-                                       distance_func=config['distance_func'],
-                                       zero_mean=config['zero_mean_eval'])
-            logging.info(f'mAP: {res["mAP"]:.6f}')
+                ##### compute mAP #####
+                res['mAP'] = calculate_mAP(db_out['codes'], db_out['labels'],
+                                           test_out['codes'], test_out['labels'],
+                                           loss_param['R'], device=map_device, onehot=onehot,
+                                           using_id=calculate_mAP_using_id,
+                                           ground_truth=ground_truth if calculate_mAP_using_id else None,
+                                           db_id=db_out['id'] if calculate_mAP_using_id else None,
+                                           test_id=test_out['id'] if calculate_mAP_using_id else None,
+                                           shuffle_database=config['shuffle_database'],
+                                           distance_func=config['distance_func'],
+                                           zero_mean=config['zero_mean_eval'])
+                logging.info(f'mAP: {res["mAP"]:.6f}')
 
-            curr_metric = res['mAP']
-            test_history.append(res)
+                curr_metric = res['mAP']
+                test_history.append(res)
 
-            if config['wandb_enable']:
-                wandb_test = res.copy()
-                wandb_test.pop("ep")
-                wandb.log(wandb_test, step=res['ep'])
-
-            if not config['save_best_model_only']:
-                io.fast_save(db_out, f'{logdir}/outputs/db_out.pth')
-                io.fast_save(test_out, f'{logdir}/outputs/test_out.pth')
-            if best < curr_metric:
-                best = curr_metric
                 if config['wandb_enable']:
-                    wandb.run.summary["best_map"] = best
-                if config['save_model']:
-                    io.fast_save(modelsd, f'{logdir}/models/best.pth')
-                    if not config['discard_hash_outputs']:
-                        io.fast_save(db_out, f'{logdir}/outputs/db_best.pth')
-                        io.fast_save(test_out, f'{logdir}/outputs/test_best.pth')
-            del db_out, test_out
+                    wandb_test = res.copy()
+                    wandb_test.pop("ep")
+                    wandb.log(wandb_test, step=res['ep'])
 
-            ##### obtain training codes and statistics #####
-            if is_last and not config['dataset'] in configs.embedding_datasets:  # embed dataset oom
-                # reload for eval mode
-                train_loader = get_dataloader(config,
-                                              'train.txt',
-                                              shuffle=False,
-                                              drop_last=False,
-                                              gpu_transform=gpu_transform,
-                                              gpu_mean_transform=gpu_mean_transform,
-                                              no_augmentation=True,
-                                              skip_preprocess=False,  # do not skip as using test mode
-                                              dataset_type='',
-                                              full_batchsize=False,
-                                              seed=config['seed'])
-                _, train_out = test_hashing(model, train_loader, device, loss_param['loss'],
-                                            loss_param['loss_param'], onehot=onehot,
-                                            attr_data=attr_data, middle_graph=middle_graph,
-                                            return_codes=True, return_id=calculate_mAP_using_id,
-                                            gpu_test_transform=gpu_test_transform, method=method,
-                                            criterion=criterion)
+                if not config['save_best_model_only']:
+                    io.fast_save(db_out, f'{logdir}/outputs/db_out.pth')
+                    io.fast_save(test_out, f'{logdir}/outputs/test_out.pth')
+                if best < curr_metric:
+                    best = curr_metric
+                    if config['wandb_enable']:
+                        wandb.run.summary["best_map"] = best
+                    if config['save_model']:
+                        io.fast_save(modelsd, f'{logdir}/models/best.pth')
+                        if not config['discard_hash_outputs']:
+                            io.fast_save(db_out, f'{logdir}/outputs/db_best.pth')
+                            io.fast_save(test_out, f'{logdir}/outputs/test_best.pth')
+                del db_out, test_out
 
-                io.fast_save(train_out, f'{logdir}/outputs/train_out.pth')
+                ##### obtain training codes and statistics #####
+                if is_last and not config['dataset'] in configs.embedding_datasets:  # embed dataset oom
+                    # reload for eval mode
+                    train_loader = get_dataloader(config,
+                                                  'train.txt',
+                                                  shuffle=False,
+                                                  drop_last=False,
+                                                  gpu_transform=gpu_transform,
+                                                  gpu_mean_transform=gpu_mean_transform,
+                                                  no_augmentation=True,
+                                                  skip_preprocess=False,  # do not skip as using test mode
+                                                  dataset_type='',
+                                                  full_batchsize=False,
+                                                  seed=config['seed'])
+                    _, train_out = test_hashing(model, train_loader, device, loss_param['loss'],
+                                                loss_param['loss_param'], onehot=onehot,
+                                                attr_data=attr_data, middle_graph=middle_graph,
+                                                return_codes=True, return_id=calculate_mAP_using_id,
+                                                gpu_test_transform=gpu_test_transform, method=method,
+                                                criterion=criterion)
 
-        ##### save model, codes and statistics #####
-        json.dump(train_history, open(f'{logdir}/train_history.json', 'w+'), indent=2, sort_keys=True)
+                    io.fast_save(train_out, f'{logdir}/outputs/train_out.pth')
 
-        if len(test_history) != 0:
-            json.dump(test_history, open(f'{logdir}/test_history.json', 'w+'), indent=2, sort_keys=True)
+            ##### save model, codes and statistics #####
+            json.dump(train_history, open(f'{logdir}/train_history.json', 'w+'), indent=2, sort_keys=True)
 
-        save_now = config['save_interval'] != 0 and (ep + 1) % config['save_interval'] == 0
-        if save_now and config['save_model']:
-            io.fast_save(modelsd, f'{logdir}/models/ep{ep + 1}.pth')
+            if len(test_history) != 0:
+                json.dump(test_history, open(f'{logdir}/test_history.json', 'w+'), indent=2, sort_keys=True)
+
+            save_now = config['save_interval'] != 0 and (ep + 1) % config['save_interval'] == 0
+            if save_now and config['save_model']:
+                io.fast_save(modelsd, f'{logdir}/models/ep{ep + 1}.pth')
+
+        ###update ECCV20
+        expand_U = torch.zeros(B.shape).to(device)
+        expand_U[total_img_indexes, :] = U
+        B = solve_dcc(B, U, expand_U, S, nbit, 200)
+
 
     ##### training end #####
     modelsd = model.state_dict()
