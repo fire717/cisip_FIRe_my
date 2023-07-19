@@ -310,9 +310,66 @@ class ADSHLoss(BaseClassificationLoss):
         cls_loss = -((mask * log_scores).sum(1) / mask.sum(1)).mean()
         return cls_loss
 
+
+    def new_contra_loss(self, x1,x2,y,margin=2.0):
+        #print(x1.shape,x2.shape,y) torch.Size([128]) torch.Size([128]) 1
+        cos_similarity = F.cosine_similarity(x1, x2,dim=0)
+        #print(cos_similarity,cos_similarity.shape)
+        loss_contrastive = torch.mean((1-y) * torch.pow(cos_similarity, 2) +
+                                      (y) * torch.pow(torch.clamp(margin - cos_similarity, min=0.0), 2))
+        return loss_contrastive
+
+    def attr_contra_loss(self, attr_embed, attr_labels, cls_labels, pos_th):
+        #torch.Size([64, 102, 128]) torch.Size([102, 717]) torch.Size([64]
+        bs = attr_embed.shape[0]
+        attr_dim = attr_embed.shape[1]
+
+        attr_labels = attr_labels.t()
+        #print(attr_labels.shape)
+        data_attr_labels = attr_labels[cls_labels]  #64,102
+        #print(data_attr_labels,data_attr_labels.shape)
+#
+        # t = data_attr_labels[0]-data_attr_labels[1]
+        # print(torch.max(t),torch.min(t),torch.mean(t))  #0.047,-0.046,-0.0024 for sun
+        #                                                 #3   -4    0  for cub
+        #                                                 # 1.6  -1.8   0         for awa2
+        # bb
+        #构建所有的pos对
+        loss = 0
+        count = 0
+        count1 = 0
+        for i in range(attr_dim):#遍历属性的每一位
+            matched = [0 for _ in range(bs)] #记录是否match过
+            for j in range(bs-1):
+                if matched[j]==1:
+                    continue
+                for k in range(j+1,bs):
+                    if matched[k]==1:
+                        continue
+                    else:
+                        embed1 = attr_embed[j][i]
+                        embed2 = attr_embed[k][i]
+                        label = 0
+                        if torch.abs(data_attr_labels[j][i]-data_attr_labels[k][i])<pos_th:
+                            label = 1
+                            count1+=1
+                        loss_one = self.new_contra_loss(embed1, embed2, label)
+                        #print(loss_one)
+                        #bb
+                        loss+=loss_one
+                        count+=1
+                        matched[k]=1
+                        if count > bs*3:
+                            return loss/max(count,1)
+
+        loss = loss/max(count,1)
+        return loss
+
+
+
     def forward(self, logits, code_logits, labels, 
         pre_attri, pre_class,label_a,label_v,attention,middle_graph,
-        embed_real, outz_real,attr_data,Dis_Embed_Att,
+        embed_real, outz_real,attr_data,Dis_Embed_Att, new1,
         B=None, S=None, omega=None,
         onehot=True):
         if self.multiclass:
@@ -328,7 +385,7 @@ class ADSHLoss(BaseClassificationLoss):
         self.attrloss = self.nips2020attrloss(pre_attri, pre_class,label_a,label_v,attention,middle_graph)
 
         # ### cvpr2021
-        ins_w = 2#1for cub   0.2for awa2   4for sun
+        ins_w = 1#2#1for cub   0.2for awa2   4for sun
         # cls_w = 0#1for cub   0.2for awa2   4for sun
         real_ins_contras_loss = self.contras_criterion(outz_real, label_v)
         if torch.isnan(real_ins_contras_loss):
@@ -337,16 +394,22 @@ class ADSHLoss(BaseClassificationLoss):
 
 
         # ### IJCAI21
-        icjai_w = 6#0.1for cub   0.1for awa2   6for sun
+        icjai_w = 0#0.1for cub   0.1for awa2   6for sun
         icjai21loss = self.ijcai21loss(code_logits, label_v)
 
 
         # ### ECCV2022
-        adsh_w = 0.1 #0.3#1for cub    1for awa2   for sun
-        adsh_loss = 0 
-        if B is not None:
-            adsh_loss, _, _ = self.criterion_eccv2022_semicon(code_logits, B, S, omega)
+        # adsh_w = 0 #0.3#1for cub    1for awa2   for sun
+        # adsh_loss = 0 
+        # if B is not None:
+        #     adsh_loss, _, _ = self.criterion_eccv2022_semicon(code_logits, B, S, omega)
 
+        #attr contra
+        new1_loss = self.attr_contra_loss(new1, attr_data, labels, pos_th = 0.03)
+        new1_w = 0.2
+        # print(torch.max(t),torch.min(t),torch.mean(t))  #0.047,-0.046,-0.0024  0.03 for sun
+        #                                                 #3   -4    0        2  for cub
+        #                                                 # 1.6  -1.8   0     0.5 for awa2
 
         margin_logits = self.get_margin_logits(logits, labels)
         ce = F.cross_entropy(margin_logits, labels)
@@ -367,6 +430,7 @@ class ADSHLoss(BaseClassificationLoss):
         loss = ce + self.alpha * meanhd + self.beta * varhd +attr_w*self.attrloss + \
                 ins_w*real_ins_contras_loss + \
                 icjai_w*icjai21loss + \
-                adsh_w*adsh_loss
+                new1_w*new1_loss
+                #adsh_w*adsh_loss
 
         return loss

@@ -53,6 +53,11 @@ class ArchOrthoHash(BaseArch):
                                 nn.Linear(nhF, 1)
                             )
 
+        ### new add
+        self.attr_conv2 = nn.Conv2d(2048, n_attr, 1, 1)
+        self.attr_emb = 128
+        self.attr_fc = nn.Linear(49, self.attr_emb)
+
 
     def get_features_params(self):
         return self.backbone.get_features_params()
@@ -62,6 +67,11 @@ class ArchOrthoHash(BaseArch):
 
     def forward(self, x, attribute):
         x,features = self.backbone(x)
+
+        ## new attr contra
+        new1 = self.attr_conv(features) #64,85,7,7
+        new1 = new1.view(new1.shape[0], new1.shape[1], -1) #64,85,49
+        new1 = self.attr_fc(new1)  #64,85,128
 
         ### add 2020nips attr branch
         attention = self.attr_conv(features) #64,85,7,7
@@ -74,4 +84,4 @@ class ArchOrthoHash(BaseArch):
 
         v = self.hash_fc(x)
         u = self.ce_fc(v)
-        return u, v, pre_attri, pre_class,attention,embedding,out_z
+        return u, v, pre_attri, pre_class,attention,embedding,out_z,new1

@@ -579,7 +579,7 @@ def main(config, gpu_transform=False, gpu_mean_transform=False, method='supervis
     S = S * (1 + r) - r   #最大值还是1不变，最小的-1变为-1-2r
 
 
-    niters = 5#6
+    niters = 1#6
     for it in range(niters):
 
         train_loader, test_loader, db_loader,attr_data,train_labels,num_train,train_paths = prepare_dataloader(config,
