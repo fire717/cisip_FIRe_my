@@ -37,6 +37,7 @@ from utils.augmentations import (
     get_mean_transforms_gpu
 )
 from utils.misc import Timer, AverageMeter
+from utils.pr_curve import pr_curve
 
 
 def backward_general(output, loss, optimizer,
@@ -251,6 +252,8 @@ def test_hashing(model, test_loader, device, loss_name, loss_cfg, onehot,
     #2020nips
     attr_data = torch.from_numpy(attr_data).to(device).t()
 
+    # total_pre = []
+    # total_label = []
     for i, batch in enumerate(pbar):
         with torch.no_grad():
             data, labels, index = batch[:3]
@@ -283,6 +286,7 @@ def test_hashing(model, test_loader, device, loss_name, loss_cfg, onehot,
                 if return_id:
                     ret_id.append(index[0])
 
+            #total_pre.append(output['logits'],labels)
         update_meters_general(method, model, meters, output, labels, onehot, criterion, loss_name, loss_cfg)
         criterion.losses.clear()  # clear the key in losses
 
@@ -671,6 +675,13 @@ def main(config, gpu_transform=False, gpu_mean_transform=False, method='supervis
                 for key in test_meters: res['test_' + key] = test_meters[key].avg
                 for key in db_meters: res['db_' + key] = db_meters[key].avg
 
+                #print(test_out['codes'].shape,test_out['labels'].shape)
+                #torch.Size([1500, 64]) torch.Size([1500, 200]  for cub
+                #即测试集1500条的哈希码、对应的类别one-hot预测
+                pr_auc = pr_curve(test_out['codes'],db_out['codes'],test_out['labels'],db_out['labels'])
+                #bb
+                print("---[AUC] ",pr_auc)
+                
                 map_device = device
                 if db_out['codes'].numel() > 400000000:
                     db_out['codes'] = db_out['codes'].cpu()
@@ -688,6 +699,7 @@ def main(config, gpu_transform=False, gpu_mean_transform=False, method='supervis
                                            shuffle_database=config['shuffle_database'],
                                            distance_func=config['distance_func'],
                                            zero_mean=config['zero_mean_eval'])
+                #print(res['mAP'],res['R'],res['P'])
                 logging.info(f'mAP: {res["mAP"]:.6f}')
 
                 curr_metric = res['mAP']

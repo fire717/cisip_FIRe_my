@@ -52,5 +52,7 @@ def calculate_accuracy(logits, labels, mmclass, onehot=True):
             acc = (logits.argmax(1) == labels.argmax(1)).float().mean()
         else:
             acc = (logits.argmax(1) == labels).float().mean()  # logits still is one hot encoding
-
+    #print(logits.shape, labels.shape) #torch.Size([64, 200]) torch.Size([64, 200]
+    # print(acc)
+    # bb
     return acc

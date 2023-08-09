@@ -74,4 +74,6 @@ class ResNetBackbone(BaseBackbone):
 
         x = self.avgpool(features)
         x = torch.flatten(x, 1)
+        # print(x.shape, features.shape)[64, 2048]) torch.Size([64, 2048, 7, 7])
+        # bb
         return x,features
