@@ -385,7 +385,7 @@ class ADSHLoss(BaseClassificationLoss):
         self.attrloss = self.nips2020attrloss(pre_attri, pre_class,label_a,label_v,attention,middle_graph)
 
         # ### cvpr2021
-        ins_w = 2#2#1for cub   0.2for awa2   4for sun
+        ins_w = 1#2#1for cub   0.2for awa2   4for sun
         # cls_w = 0#1for cub   0.2for awa2   4for sun
         real_ins_contras_loss = self.contras_criterion(outz_real, label_v)
         if torch.isnan(real_ins_contras_loss):
@@ -405,8 +405,8 @@ class ADSHLoss(BaseClassificationLoss):
         #     adsh_loss, _, _ = self.criterion_eccv2022_semicon(code_logits, B, S, omega)
 
         #attr contra
-        new1_loss = self.attr_contra_loss(new1, attr_data, labels, pos_th = 0.6)
-        new1_w = 4
+        new1_loss = self.attr_contra_loss(new1, attr_data, labels, pos_th = 2)
+        new1_w = 1.
         # print(torch.max(t),torch.min(t),torch.mean(t))  #0.047,-0.046,-0.0024  0.03 for sun
         #                                                 #3   -4    0        2  for cub
         #                                                 # 1.6  -1.8   0     0.5 for awa2
