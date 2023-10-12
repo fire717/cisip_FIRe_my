@@ -476,10 +476,13 @@ def main(config, gpu_transform=False, gpu_mean_transform=False, method='supervis
 
     ##### dataset preparation #####
     workers = 1 if config['dataset'] in ['gldv2delgembed'] else config['num_worker']
-    train_loader, test_loader, db_loader,attr_data,train_labels,num_train,train_paths = prepare_dataloader(config,
+    train_loader, test_loader, db_loader,attr_data,train_labels,num_train,train_paths,transzero_att,transzero_w2v_att,mask_bias = prepare_dataloader(config,
                                                               gpu_transform=gpu_transform,
                                                               gpu_mean_transform=gpu_mean_transform,
                                                               workers=workers, seed=config['seed'])
+    config['transzero_att'] = transzero_att
+    config['transzero_w2v_att'] = transzero_w2v_att
+    config['mask_bias'] = mask_bias
     # sample_index = np.array([i for i in range(len(train_paths))])
     # print(len(train_paths))
     #bb
@@ -586,7 +589,7 @@ def main(config, gpu_transform=False, gpu_mean_transform=False, method='supervis
     niters = 1#6
     for it in range(niters):
 
-        train_loader, test_loader, db_loader,attr_data,train_labels,num_train,train_paths = prepare_dataloader(config,
+        train_loader, test_loader, db_loader,attr_data,train_labels,num_train,train_paths,transzero_att,transzero_w2v_att,mask_bias = prepare_dataloader(config,
                                                               gpu_transform=gpu_transform,
                                                               gpu_mean_transform=gpu_mean_transform,
                                                               workers=workers, seed=config['seed'])
@@ -652,7 +655,7 @@ def main(config, gpu_transform=False, gpu_mean_transform=False, method='supervis
                     'criterion': criterion,
                     'epoch': ep
                 }, f'{logdir}/checkpoint.pth')
-
+            
             ##### evaluation #####
             is_last = (ep + 1) == nepochs
             eval_now = is_last or (neval != 0 and (ep + 1) % neval == 0)
@@ -666,6 +669,7 @@ def main(config, gpu_transform=False, gpu_mean_transform=False, method='supervis
                                                      return_codes=True, return_id=calculate_mAP_using_id,
                                                      gpu_test_transform=gpu_test_transform, method=method,
                                                      criterion=criterion, no_loss=benchmark)
+
                 db_meters, db_out = test_hashing(model, db_loader, device, loss_param['loss'],
                                                  loss_param['loss_param'], onehot=onehot,
                                                  attr_data=attr_data, middle_graph=middle_graph,

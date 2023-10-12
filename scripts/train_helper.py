@@ -203,6 +203,8 @@ def prepare_dataloader(config,
     :param seed:
     :return:
     """
+    # print(config)
+    # bb
     logging.info('Creating Datasets')
     if include_train:
         no_augmentation = config['dataset_kwargs'].get('no_augmentation', False)
@@ -218,6 +220,12 @@ def prepare_dataloader(config,
         attr_data = train_dataset.attr_data
         train_labels = train_dataset.train_labels
         train_paths = train_dataset.train_data
+
+        transzero_att = train_dataset.att
+        transzero_w2v_att = train_dataset.w2v_att
+        mask_bias = train_dataset.mask_bias
+
+
         num_train = len(train_dataset)
         if dataset_type == 'rotation':
             logging.info('Using Rotation Dataset!')
@@ -290,7 +298,7 @@ def prepare_dataloader(config,
                                    workers=workers,
                                    seed=seed)
 
-    return train_loader, test_loader, db_loader, attr_data, train_labels,num_train,train_paths
+    return train_loader, test_loader, db_loader, attr_data, train_labels,num_train,train_paths, transzero_att,transzero_w2v_att,mask_bias
 
 
 def prepare_model(config, device: torch.device):
@@ -316,6 +324,7 @@ def prepare_model(config, device: torch.device):
     :return:
     """
     logging.info('Creating Model')
+    
     model = configs.arch(config)
     # if (torch.cuda.device_count() > 1) and (config['device'] == 'cuda'):  # cuda device is not specified, use all
     #     logging.info('Using DataParallel Model')

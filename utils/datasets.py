@@ -18,6 +18,7 @@ from functions.evaluate_roxf import configdataset, DATASETS
 from functions.mining import SimpleMemoryBank
 from utils.augmentations import GaussianBlurOpenCV
 import scipy.io as sio
+import h5py
 
 DATA_FOLDER = {
     'nuswide': 'data/nuswide_v2_256_resize',  # resize to 256x256
@@ -327,11 +328,55 @@ class CubDataset(Dataset):
         self.class_id_path = os.path.join(self.root,"classes.txt")
         self.attr_path = os.path.join(self.root,"attributes","class_attribute_labels_continuous.txt")
 
+
         self.all_class_names = []
         self.use_classes = []
 
+
+
+        self.read_matdataset()
+        # bb
         self.init_data()
 
+    #transzero
+    def read_matdataset(self):
+        path= os.path.join(self.root,'feature_map_ResNet_101_CUB.hdf5')
+        # tic = time.time()
+        classnames = os.path.join(self.root,'../','xlsa17/data/CUB/allclasses.txt')
+        with open(classnames, 'r') as f:
+            lines = f.readlines()
+        print("len classnames:",len(lines))
+        nameids = [int(x.split('.')[0]) for x in lines]
+        nameindex = np.argsort(nameids)
+        #print(nameindex)
+        #print(lines[nameindex])
+
+        hf = h5py.File(path, 'r')
+
+        #print('Expert Attr')
+        self.att = np.array(hf.get('att'))
+        # print(att.shape) #200, 312
+        #self.att = torch.from_numpy(att).float().to(self.device)
+        
+        self.original_att = np.array(hf.get('original_att'))
+        # print(self.original_att.shape) #200, 312
+        # bb
+        #self.original_att = torch.from_numpy(original_att).float().to(self.device)
+        
+        self.w2v_att = np.array(hf.get('w2v_att'))
+        #self.w2v_att = torch.from_numpy(w2v_att).float().to(self.device)
+        # print(self.w2v_att.shape) #312, 300
+        # bb
+        self.normalize_att = self.original_att/100
+
+        #print(labels)
+        #print(self.att[:3])   our order
+        self.att = self.att[nameindex]
+        self.original_att = self.original_att[nameindex]
+        #self.w2v_att = self.w2v_att[nameindex]
+        self.normalize_att = self.normalize_att[nameindex]
+        #print(self.att[:3])
+ 
     def init_data(self):
         with open(self.class_id_path, 'r') as f:
             class_lines = f.readlines()
@@ -382,21 +427,25 @@ class CubDataset(Dataset):
         print(f'Number of data: {self.train_data.shape[0]}')
 
 
+        
         ###load attr
         attr_data = []
         #print(self.attr_path)
         with open(self.attr_path,'r') as f:
             lines = f.readlines()
-            #print(len(lines))
+            print(len(lines))
             for line in lines:
                 values = [float(x) for x in line.strip().replace("    "," ").replace("   "," ").replace("  "," ").split(" ")]
                 #参考2020nipt读取的mat，反推出的归一化方式
+                # print(values)
+                # break
                 mean = np.mean(values)
                 std_dev = np.std(values)
                 standardized_array = (values - mean) / std_dev
                 attr_data.append(standardized_array)
         attr_data = np.array(attr_data) #50x85
-        # print(attr_data)
+        # print(attr_data[:3])
+        # print(attr_data.shape)
         # bb
         #这里顺序应该和classes一致
         #print(self.all_class_names, seen_classes)
@@ -404,9 +453,16 @@ class CubDataset(Dataset):
         unseen_classes = [line.strip().split(' ')[1] for line in class_lines[150:]]
         total_classes = seen_classes+unseen_classes
         seen_id = [self.all_class_names.index(name) for name in total_classes]
+        # print(attr_data.shape, seen_id)
         self.attr_data = attr_data[seen_id] #40x85for train 改成直接取所有类50x85
         # print(self.attr_data.shape)
         # bb
+        # ## tranzero
+        #print(seen_classes,len(seen_classes))#str name 150
+        mask_bias = np.ones((1, len(self.all_class_names)))
+        seenclassids = [x for x in range(len(seen_classes))]
+        mask_bias[:, np.array(seenclassids)] *= -1
+        self.mask_bias = mask_bias
 
     def __getitem__(self, index):
         """

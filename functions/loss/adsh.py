@@ -1,6 +1,6 @@
 # Angular deep supervised hashing for image retrieval
 import logging
-
+import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.autograd import Function
@@ -137,6 +137,12 @@ class ADSH_Loss(torch.nn.Module):
         loss = hash_loss + quantization_loss
         return loss, hash_loss, quantization_loss
 
+
+
+
+
+
+
 class ADSHLoss(BaseClassificationLoss):
     def __init__(self, alpha=1, beta=1, s=10, m=0.2, multiclass=False, method='cosface', **kwargs):
         super().__init__()
@@ -166,6 +172,72 @@ class ADSHLoss(BaseClassificationLoss):
 
 
         self.criterion_eccv2022_semicon = ADSH_Loss(code_length=64)
+
+        ###transzero
+        #print(kwargs)
+        nclass=200 #cub
+        self.seenclass = torch.Tensor([x for x in range(150)]).cuda()
+        self.unseenclass = np.array([x for x in range(150,200)])
+        self.weight_ce = torch.nn.Parameter(torch.eye(nclass), requires_grad=False)
+        self.is_bias = True
+        self.is_conservative = True
+        self.log_softmax_func = torch.nn.LogSoftmax(dim=1)
+
+    ### transzero loss
+    def compute_loss_Self_Calibrate(self, in_package):
+        S_pp = in_package['pred']
+        Prob_all = F.softmax(S_pp, dim=-1)
+        #print(self.unseenclass)
+        Prob_unseen = Prob_all[:, self.unseenclass]
+        assert Prob_unseen.size(1) == len(self.unseenclass)
+        mass_unseen = torch.sum(Prob_unseen, dim=1)
+        loss_pmp = -torch.log(torch.mean(mass_unseen))
+        return loss_pmp
+
+    def compute_aug_cross_entropy(self, in_package):
+        Labels = in_package['batch_label']
+        S_pp = in_package['pred']
+        vec_bias = in_package['vec_bias']
+
+        if self.is_bias:
+            S_pp = S_pp - vec_bias
+
+        if not self.is_conservative:
+            S_pp = S_pp[:, self.seenclass]
+            Labels = Labels[:, self.seenclass]
+            assert S_pp.size(1) == len(self.seenclass)
+
+        Prob = self.log_softmax_func(S_pp)
+
+        loss = -torch.einsum('bk,bk->b', Prob, Labels)
+        loss = torch.mean(loss)
+        return loss
+
+    def compute_reg_loss(self, in_package):
+        att = in_package['att']
+        tgt = torch.matmul(in_package['batch_label'], att)
+        embed = in_package['embed']
+        loss_reg = F.mse_loss(embed, tgt, reduction='mean')
+        return loss_reg
+
+    def compute_loss_transzero(self, in_package):
+        if len(in_package['batch_label'].size()) == 1:
+            in_package['batch_label'] = self.weight_ce[in_package['batch_label']]
+
+        loss_CE = self.compute_aug_cross_entropy(in_package)
+        loss_cal = self.compute_loss_Self_Calibrate(in_package)
+        loss_reg = self.compute_reg_loss(in_package)
+
+        ### for cub
+        lambda_ = 0.3
+        lambda_reg = 0.005
+
+        loss = loss_CE + lambda_ * \
+            loss_cal + lambda_reg * loss_reg
+        # out_package = {'loss': loss, 'loss_CE': loss_CE,
+        #                'loss_cal': loss_cal, 'loss_reg': loss_reg}
+        return loss#out_package
+
 
     def get_hamming_distance(self):
         assert self.weight is not None, 'please set weights before calling this function'
@@ -328,7 +400,7 @@ class ADSHLoss(BaseClassificationLoss):
         #print(attr_labels.shape)
         data_attr_labels = attr_labels[cls_labels]  #64,102
         #print(data_attr_labels,data_attr_labels.shape)
-#
+
         # t = data_attr_labels[0]-data_attr_labels[1]
         # print(torch.max(t),torch.min(t),torch.mean(t))  #0.047,-0.046,-0.0024 for sun
         #                                                 #3   -4    0  for cub
@@ -370,7 +442,7 @@ class ADSHLoss(BaseClassificationLoss):
     def forward(self, logits, code_logits, labels, 
         pre_attri, pre_class,label_a,label_v,attention,middle_graph,
         embed_real, outz_real,attr_data,Dis_Embed_Att, new1,
-        B=None, S=None, omega=None,
+        B=None, S=None, omega=None,package=None,
         onehot=True):
         if self.multiclass:
             logits, labels = self.get_dynamic_logits(logits, code_logits, labels)
@@ -379,10 +451,16 @@ class ADSHLoss(BaseClassificationLoss):
             if onehot:
                 labels = labels.argmax(1)
 
+        # print(pre_class)
+        # bb
+        ### transzero 
+        transzero_loss = self.compute_loss_transzero(package)
+        transzero_w = 0.2
+        transzero_loss *= transzero_w
 
         ### nips2020
-        attr_w = 1#2for cub  0.5for awa2  2for sun
-        self.attrloss = self.nips2020attrloss(pre_attri, pre_class,label_a,label_v,attention,middle_graph)
+        attr_w = 0#2for cub  0.5for awa2  2for sun
+        self.attrloss = 0#self.nips2020attrloss(pre_attri, pre_class,label_a,label_v,attention,middle_graph)
 
         # ### cvpr2021
         ins_w = 1#2#1for cub   0.2for awa2   4for sun
@@ -430,7 +508,8 @@ class ADSHLoss(BaseClassificationLoss):
         loss = ce + self.alpha * meanhd + self.beta * varhd +attr_w*self.attrloss + \
                 ins_w*real_ins_contras_loss + \
                 icjai_w*icjai21loss + \
-                new1_w*new1_loss
+                new1_w*new1_loss + \
+                transzero_loss
                 #adsh_w*adsh_loss
 
         return loss

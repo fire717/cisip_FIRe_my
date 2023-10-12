@@ -213,6 +213,7 @@ if __name__ == "__main__":
     else:
         ds = args.ds
 
+
     arch = get_arch(args.loss, args.arch)
     nbit = args.nbit
     nclass = configs.nclass(ds)  # just a dummy one, will be reset below
