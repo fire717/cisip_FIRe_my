@@ -11,6 +11,7 @@ def get_relative_pos(x, batch_size, norm_len):
     return x / norm_len
 
 def get_grids_pos(batch_size, seq_len, grid_size=(7, 7)):
+    #print(seq_len,grid_size) 49 (14, 14)
     assert seq_len == grid_size[0] * grid_size[1]
     x = torch.arange(0, grid_size[0]).float().cuda()
     y = torch.arange(0, grid_size[1]).float().cuda()
@@ -210,8 +211,10 @@ class MultiLevelEncoder_woPad(nn.Module):
             [nn.Linear(64, 1, bias=True) for _ in range(h)])
 
     def forward(self, input, attention_mask=None, attention_weights=None, pos=None):
-        relative_geometry_embeddings = BoxRelationalEmbedding(
-            input, grid_size=(14, 14))
+        # relative_geometry_embeddings = BoxRelationalEmbedding(input, 
+        #                                 grid_size=(14, 14))
+        relative_geometry_embeddings = BoxRelationalEmbedding(input, 
+                                        grid_size=(7, 7))
         flatten_relative_geometry_embeddings = relative_geometry_embeddings.view(
             -1, 64)
         box_size_per_head = list(relative_geometry_embeddings.shape[:3])
@@ -375,8 +378,8 @@ class ArchOrthoHash(BaseArch):
         ### new add
         self.attr_conv2 = nn.Conv2d(2048, n_attr, 1, 1)
         self.attr_emb = 128
-        self.attr_fc = nn.Linear(196, self.attr_emb)
-
+        #self.attr_fc = nn.Linear(196, self.attr_emb)
+        self.attr_fc = nn.Linear(49, self.attr_emb)
 
     def get_features_params(self):
         return self.backbone.get_features_params()

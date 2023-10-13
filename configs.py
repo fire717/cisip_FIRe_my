@@ -70,7 +70,7 @@ def imagesize(config):
         'sop_instance': 256,
         'food101': 256,
         'awa2': 256,
-        'cub':512,#256,
+        'cub':256,
         'sun':256
     }[dsname]
     # print(dsname,r)
@@ -103,7 +103,7 @@ def cropsize(config):
         'sop_instance': 224,
         'food101': 224,
         'awa2': 224,
-        'cub':448,#224,
+        'cub':224,
         'sun':224
     }[dsname]
 

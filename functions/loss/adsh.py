@@ -229,10 +229,10 @@ class ADSHLoss(BaseClassificationLoss):
         loss_reg = self.compute_reg_loss(in_package)
 
         ### for cub
-        lambda_ = 0.3
+        lambda_ = 0.5
         lambda_reg = 0.005
-
-        loss = loss_CE + lambda_ * \
+        w_ce = 0.1
+        loss = w_ce*loss_CE + lambda_ * \
             loss_cal + lambda_reg * loss_reg
         # out_package = {'loss': loss, 'loss_CE': loss_CE,
         #                'loss_cal': loss_cal, 'loss_reg': loss_reg}
@@ -455,7 +455,7 @@ class ADSHLoss(BaseClassificationLoss):
         # bb
         ### transzero 
         transzero_loss = self.compute_loss_transzero(package)
-        transzero_w = 0.2
+        transzero_w = 0.1
         transzero_loss *= transzero_w
 
         ### nips2020
