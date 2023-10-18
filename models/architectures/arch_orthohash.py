@@ -283,15 +283,21 @@ class Transformer(nn.Module):
             decoder_layer, num_layers=dc_layer)
 
     def forward(self, f_cv, f_attr):
+        # print(f_cv.shape, f_attr.shape)
+        #([12, 2048, 49]) torch.Size([312, 300])
         # linearly map to common dim
         h_cv = self.embed_cv(f_cv.permute(0, 2, 1))
         h_attr = self.embed_attr(f_attr)
         h_attr_batch = h_attr.unsqueeze(0).repeat(f_cv.shape[0], 1, 1)
         # visual encoder
         memory = self.transformer_encoder(h_cv).permute(1, 0, 2)
+        # print(h_cv.shape,h_attr.shape,h_attr_batch.shape,memory.shape)
+        #[12, 49, 300]) [312, 300]) [12, 312, 300]) [49, 12, 300])
+
+        # bb
         # attribute-visual decoder
         out = self.transformer_decoder(h_attr_batch.permute(1, 0, 2), memory)
-        return out.permute(1, 0, 2)
+        return out.permute(1, 0, 2),h_cv,h_attr_batch
 
 @register_network('orthohash')
 class ArchOrthoHash(BaseArch):
@@ -304,8 +310,9 @@ class ArchOrthoHash(BaseArch):
         transzero_att = config['transzero_att']
         transzero_w2v_att = config['transzero_w2v_att'] 
         mask_bias = config['mask_bias'] 
-        # print(transzero_att.shape, transzero_w2v_att.shape)
-        # bb
+        #print(transzero_att.shape, transzero_w2v_att.shape)
+        #(200, 312) (312, 300)
+        #bb
         bias=1
         self.bias = nn.Parameter(torch.tensor(bias), requires_grad=False)
         # nclass=200
@@ -381,6 +388,12 @@ class ArchOrthoHash(BaseArch):
         #self.attr_fc = nn.Linear(196, self.attr_emb)
         self.attr_fc = nn.Linear(49, self.attr_emb)
 
+
+        ###fashionSAP
+        embed_dim = 256
+        self.img2embed = nn.Linear(300*49, embed_dim)
+        self.text2embed = nn.Linear(312*300, embed_dim)
+
     def get_features_params(self):
         return self.backbone.get_features_params()
 
@@ -393,13 +406,27 @@ class ArchOrthoHash(BaseArch):
             shape = Fs.shape
             Fs = Fs.reshape(shape[0], shape[1], shape[2] * shape[3])
         Fs = F.normalize(Fs, dim=1)
+
+
+        # print(Fs.shape, self.V.shape)12, 2048, 49]) torch.Size([312, 300
+        # bb
+
+        ### fashionSAP
         # attributes
         #V_n = self.V
         # locality-augmented visual features
-        Trans_out = self.transformer(Fs, self.V)
+        Trans_out,h_cv,h_attr_batch = self.transformer(Fs, self.V)
+        # print(h_cv.shape,h_attr_batch.shape)
+        h_cv = h_cv.reshape(h_cv.shape[0],-1)
+        h_attr_batch = h_attr_batch.reshape(h_attr_batch.shape[0],-1)
+        # print(h_cv.shape,h_attr_batch.shape)
+        im_to_att_embedding = self.img2embed(h_cv)
+        text_to_att_embedding = self.text2embed(h_attr_batch)
+        # print(im_to_att_embedding.shape, text_to_att_embedding.shape)
+        # bb
         # embedding to semantic space
         embed = torch.einsum('iv,vf,bif->bi', self.V, self.W_1, Trans_out)
-        return embed
+        return embed,im_to_att_embedding,text_to_att_embedding
 
     def forward_attribute(self, embed):
         embed = torch.einsum('ki,bi->bk', self.att, embed)
@@ -414,11 +441,13 @@ class ArchOrthoHash(BaseArch):
         # bb
 
         ### transzero
-        v2s_embed = self.forward_feature_transformer(features) #AGT?
+        v2s_embed,im_to_att_embedding,text_to_att_embedding = self.forward_feature_transformer(features) #AGT?
         # classification
         #print("v2s_embed:",v2s_embed.shape)[50, 312  属性预测？
         package = {'pred': self.forward_attribute(v2s_embed), #VSEN?
-                   'embed': v2s_embed}
+                   'embed': v2s_embed,
+                   'im_to_att_embedding':im_to_att_embedding,
+                   'text_to_att_embedding':text_to_att_embedding}
         #print(package['pred'].shape) 50,200  类别预测？
         #bb
         package['S_pp'] = package['pred']

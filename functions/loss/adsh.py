@@ -228,12 +228,23 @@ class ADSHLoss(BaseClassificationLoss):
         loss_cal = self.compute_loss_Self_Calibrate(in_package)
         loss_reg = self.compute_reg_loss(in_package)
 
+        sim_i2t = F.normalize(in_package['im_to_att_embedding'],dim=1)
+        sim_t2i = F.normalize(in_package['text_to_att_embedding'],dim=1)
+
+        loss_i2t = -torch.sum(F.log_softmax(sim_i2t, dim=1)*sim_t2i,dim=1).mean()
+        loss_t2i = -torch.sum(F.log_softmax(sim_t2i, dim=1)*sim_i2t,dim=1).mean()
+        #print(loss_i2t,loss_t2i)
+        loss_ita = (loss_i2t+loss_t2i)/2
+        w_ita = 0.1
+        #bb
+
         ### for cub
         lambda_ = 0.5
         lambda_reg = 0.005
         w_ce = 0.1
         loss = w_ce*loss_CE + lambda_ * \
-            loss_cal + lambda_reg * loss_reg
+            loss_cal + lambda_reg * loss_reg + \
+            w_ita*loss_ita
         # out_package = {'loss': loss, 'loss_CE': loss_CE,
         #                'loss_cal': loss_cal, 'loss_reg': loss_reg}
         return loss#out_package
@@ -451,8 +462,9 @@ class ADSHLoss(BaseClassificationLoss):
             if onehot:
                 labels = labels.argmax(1)
 
-        # print(pre_class)
-        # bb
+        #print(label_v.shape,logits.shape)
+        #label_v:每条数据对应的class id  非onehot
+        
         ### transzero 
         transzero_loss = self.compute_loss_transzero(package)
         transzero_w = 0.1
