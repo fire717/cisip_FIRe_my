@@ -177,13 +177,13 @@ class ADSHLoss(BaseClassificationLoss):
 
         ###transzero
         #print(kwargs)
-        # nclass=200 #cub
-        # self.seenclass = torch.Tensor([x for x in range(150)]).cuda()
-        # self.unseenclass = np.array([x for x in range(150,200)])
+        nclass=200 #cub
+        self.seenclass = torch.Tensor([x for x in range(150)]).cuda()
+        self.unseenclass = np.array([x for x in range(150,200)])
 
-        nclass=717 #sun
-        self.seenclass = torch.Tensor([x for x in range(500)]).cuda()
-        self.unseenclass = np.array([x for x in range(500,717)])
+        # nclass=717 #sun
+        # self.seenclass = torch.Tensor([x for x in range(500)]).cuda()
+        # self.unseenclass = np.array([x for x in range(500,717)])
 
         self.weight_ce = torch.nn.Parameter(torch.eye(nclass), requires_grad=False)
         self.is_bias = True
@@ -248,7 +248,7 @@ class ADSHLoss(BaseClassificationLoss):
         loss_t2i = -torch.sum(F.log_softmax(sim_t2i, dim=1)*sim_i2t,dim=1).mean()
         #print(loss_i2t,loss_t2i)
         loss_ita = (loss_i2t+loss_t2i)/2
-        w_ita = 0.001
+        w_ita = 0.1
         #bb
 
         ### for cub
@@ -486,7 +486,7 @@ class ADSHLoss(BaseClassificationLoss):
         # print("222 ",package['batch_label'].shape)
         ### transzero 
         transzero_loss = self.compute_loss_transzero(package)
-        transzero_w = 0.01
+        transzero_w = 0.1
         transzero_loss *= transzero_w
 
         ### nips2020
@@ -494,7 +494,7 @@ class ADSHLoss(BaseClassificationLoss):
         self.attrloss = 0#self.nips2020attrloss(pre_attri, pre_class,label_a,label_v,attention,middle_graph)
 
         # ### cvpr2021
-        ins_w = 2#2#1for cub   0.2for awa2   4for sun
+        ins_w = 0#2#1for cub   0.2for awa2   4for sun
         # cls_w = 0#1for cub   0.2for awa2   4for sun
         real_ins_contras_loss = self.contras_criterion(outz_real, label_v)
         if torch.isnan(real_ins_contras_loss):
@@ -514,8 +514,8 @@ class ADSHLoss(BaseClassificationLoss):
         #     adsh_loss, _, _ = self.criterion_eccv2022_semicon(code_logits, B, S, omega)
 
         #attr contra
-        new1_loss = self.attr_contra_loss(new1, attr_data, labels, pos_th = 0.02)
-        new1_w = 0.2
+        new1_loss = self.attr_contra_loss(new1, attr_data, labels, pos_th = 2)
+        new1_w = 1
         # print(torch.max(t),torch.min(t),torch.mean(t))  #0.047,-0.046,-0.0024  0.03 for sun
         #                                                 #3   -4    0        2  for cub
         #                                                 # 1.6  -1.8   0     0.5 for awa2
