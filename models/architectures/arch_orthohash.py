@@ -304,8 +304,8 @@ class ArchOrthoHash(BaseArch):
     """Arch OrthoHash"""
     def __init__(self, config,  n_attr=0, **kwargs):
         super(ArchOrthoHash, self).__init__(config, **kwargs)
-
-
+ 
+        self.dataset = config['dataset']
         ##tranzero
         transzero_att = config['transzero_att']
         transzero_w2v_att = config['transzero_w2v_att'] 
@@ -391,8 +391,12 @@ class ArchOrthoHash(BaseArch):
 
         ###fashionSAP
         embed_dim = 256
+        if self.dataset=='cub':
+            attr_num = 312
+        elif self.dataset=='sun':
+            attr_num = 102
         self.img2embed = nn.Linear(300*49, embed_dim)
-        self.text2embed = nn.Linear(312*300, embed_dim)
+        self.text2embed = nn.Linear(attr_num*300, embed_dim)
 
     def get_features_params(self):
         return self.backbone.get_features_params()
@@ -443,13 +447,13 @@ class ArchOrthoHash(BaseArch):
         ### transzero
         v2s_embed,im_to_att_embedding,text_to_att_embedding = self.forward_feature_transformer(features) #AGT?
         # classification
-        #print("v2s_embed:",v2s_embed.shape)[50, 312  属性预测？
+        # print("v2s_embed:",v2s_embed.shape)
         package = {'pred': self.forward_attribute(v2s_embed), #VSEN?
                    'embed': v2s_embed,
                    'im_to_att_embedding':im_to_att_embedding,
                    'text_to_att_embedding':text_to_att_embedding}
-        #print(package['pred'].shape) 50,200  类别预测？
-        #bb
+        # print(package['pred'].shape) #
+        # bb
         package['S_pp'] = package['pred']
          
 

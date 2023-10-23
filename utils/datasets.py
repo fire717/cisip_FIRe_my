@@ -500,15 +500,50 @@ class SunDataset(Dataset):
 
         self.all_class_names = []
 
+        self.read_matdataset()
         self.init_data()
+
+    #transzero
+    def read_matdataset(self):
+        path= os.path.join(self.root,'feature_map_ResNet_101_SUN.hdf5')
+        # tic = time.time()
+        # classnames = os.path.join(self.root,'../','xlsa17/data/CUB/allclasses.txt')
+        # with open(classnames, 'r') as f:
+        #     lines = f.readlines()
+        # print("len classnames:",len(lines))
+        # nameids = [int(x.split('.')[0]) for x in lines]
+        # nameindex = np.argsort(nameids)
+        # print(nameindex)
+        # print(lines[nameindex])
+        # bb
+
+        hf = h5py.File(path, 'r')
+
+        #print('Expert Attr')
+        self.att = np.array(hf.get('att'))
+        #print(self.att.shape) #717, 102
+        #self.att = torch.from_numpy(att).float().to(self.device)
+        
+        self.original_att = np.array(hf.get('original_att'))
+        #print(self.original_att.shape) #717, 102
+        # bb
+        #self.original_att = torch.from_numpy(original_att).float().to(self.device)
+        
+        self.w2v_att = np.array(hf.get('w2v_att'))
+        #self.w2v_att = torch.from_numpy(w2v_att).float().to(self.device)
+        #print(self.w2v_att.shape) #102, 300
+        #bb
+        self.normalize_att = self.original_att/100
+
 
     def init_data(self):
         img_paths = sio.loadmat(self.img_paths)['images']
         img_paths = [x[0][0] for x in img_paths]
         basenames = [os.path.basename(x) for x in img_paths]
-        print(len(img_paths),img_paths[:3])
+        #print(len(img_paths),img_paths[:3])
         self.all_class_names = list(set([os.path.dirname(img_path) for img_path in img_paths]))
         #print(len(self.all_class_names),self.all_class_names[:3])
+        #bb
         print("Load classes: ", len(self.all_class_names))
 
 
@@ -577,13 +612,19 @@ class SunDataset(Dataset):
         # bb
         #这里顺序应该和classes一致
         #print(self.all_class_names, seen_classes)
-        # seen_classes = self.all_class_names[:500]
-        # unseen_classes = self.all_class_names[500:]
-        # total_classes = seen_classes+unseen_classes
-        # seen_id = [self.all_class_names.index(name) for name in total_classes]
-        # self.attr_data = attr_data[seen_id] #40x85for train 改成直接取所有类50x85
+        seen_classes = self.all_class_names[:500]
+        unseen_classes = self.all_class_names[500:]
+        total_classes = seen_classes+unseen_classes
+        seen_id = [self.all_class_names.index(name) for name in total_classes]
+        self.attr_data = self.attr_data[seen_id] #
         # print(self.attr_data.shape)
-        # bb
+        # ## tranzero
+        #print(seen_classes,len(seen_classes))#str name 150
+        mask_bias = np.ones((1, len(self.all_class_names)))
+        seenclassids = [x for x in range(len(seen_classes))]
+        mask_bias[:, np.array(seenclassids)] *= -1
+        self.mask_bias = mask_bias
+
 
     def __getitem__(self, index):
         """

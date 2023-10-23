@@ -8,7 +8,10 @@ def get_output_and_loss_supervised(model, criterion, data, labels, index, onehot
                     B,S,omega):
     #logits, code_logits = model(data)[:2]
     logits, code_logits, pre_attri, pre_class,attention,embed_real, outz_real,new1,package = model(data, attr_data)
+    # print(labels.shape, label_a.shape, label_v.shape)
+    # bb
     package['batch_label'] = label_v
+    # print("1111 ",package['batch_label'].shape)
     package['vec_bias'] = model.vec_bias
     package['att'] = model.att
     if no_loss:

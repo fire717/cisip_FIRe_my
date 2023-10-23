@@ -146,6 +146,8 @@ class ADSH_Loss(torch.nn.Module):
 class ADSHLoss(BaseClassificationLoss):
     def __init__(self, alpha=1, beta=1, s=10, m=0.2, multiclass=False, method='cosface', **kwargs):
         super().__init__()
+        # print(kwargs)
+        # bbb
         logging.info("Loss parameters are: ", locals())
         self.alpha = alpha
         self.beta = beta
@@ -175,13 +177,19 @@ class ADSHLoss(BaseClassificationLoss):
 
         ###transzero
         #print(kwargs)
-        nclass=200 #cub
-        self.seenclass = torch.Tensor([x for x in range(150)]).cuda()
-        self.unseenclass = np.array([x for x in range(150,200)])
+        # nclass=200 #cub
+        # self.seenclass = torch.Tensor([x for x in range(150)]).cuda()
+        # self.unseenclass = np.array([x for x in range(150,200)])
+
+        nclass=717 #sun
+        self.seenclass = torch.Tensor([x for x in range(500)]).cuda()
+        self.unseenclass = np.array([x for x in range(500,717)])
+
         self.weight_ce = torch.nn.Parameter(torch.eye(nclass), requires_grad=False)
         self.is_bias = True
         self.is_conservative = True
         self.log_softmax_func = torch.nn.LogSoftmax(dim=1)
+
 
     ### transzero loss
     def compute_loss_Self_Calibrate(self, in_package):
@@ -197,6 +205,7 @@ class ADSHLoss(BaseClassificationLoss):
     def compute_aug_cross_entropy(self, in_package):
         Labels = in_package['batch_label']
         S_pp = in_package['pred']
+        
         vec_bias = in_package['vec_bias']
 
         if self.is_bias:
@@ -224,10 +233,14 @@ class ADSHLoss(BaseClassificationLoss):
         if len(in_package['batch_label'].size()) == 1:
             in_package['batch_label'] = self.weight_ce[in_package['batch_label']]
 
+        # print(in_package['pred'].shape, in_package['batch_label'].shape)
+        # import time
+        # time.sleep(10000)
+
         loss_CE = self.compute_aug_cross_entropy(in_package)
         loss_cal = self.compute_loss_Self_Calibrate(in_package)
         loss_reg = self.compute_reg_loss(in_package)
-
+        # bb
         sim_i2t = F.normalize(in_package['im_to_att_embedding'],dim=1)
         sim_t2i = F.normalize(in_package['text_to_att_embedding'],dim=1)
 
@@ -235,13 +248,19 @@ class ADSHLoss(BaseClassificationLoss):
         loss_t2i = -torch.sum(F.log_softmax(sim_t2i, dim=1)*sim_i2t,dim=1).mean()
         #print(loss_i2t,loss_t2i)
         loss_ita = (loss_i2t+loss_t2i)/2
-        w_ita = 0.1
+        w_ita = 0.001
         #bb
 
         ### for cub
+        # lambda_ = 0.5
+        # lambda_reg = 0.005
+        # w_ce = 0.1
+
+        ### sun
         lambda_ = 0.5
         lambda_reg = 0.005
         w_ce = 0.1
+
         loss = w_ce*loss_CE + lambda_ * \
             loss_cal + lambda_reg * loss_reg + \
             w_ita*loss_ita
@@ -464,10 +483,10 @@ class ADSHLoss(BaseClassificationLoss):
 
         #print(label_v.shape,logits.shape)
         #label_v:每条数据对应的class id  非onehot
-        
+        # print("222 ",package['batch_label'].shape)
         ### transzero 
         transzero_loss = self.compute_loss_transzero(package)
-        transzero_w = 0.1
+        transzero_w = 0.01
         transzero_loss *= transzero_w
 
         ### nips2020
@@ -475,7 +494,7 @@ class ADSHLoss(BaseClassificationLoss):
         self.attrloss = 0#self.nips2020attrloss(pre_attri, pre_class,label_a,label_v,attention,middle_graph)
 
         # ### cvpr2021
-        ins_w = 1#2#1for cub   0.2for awa2   4for sun
+        ins_w = 2#2#1for cub   0.2for awa2   4for sun
         # cls_w = 0#1for cub   0.2for awa2   4for sun
         real_ins_contras_loss = self.contras_criterion(outz_real, label_v)
         if torch.isnan(real_ins_contras_loss):
@@ -495,8 +514,8 @@ class ADSHLoss(BaseClassificationLoss):
         #     adsh_loss, _, _ = self.criterion_eccv2022_semicon(code_logits, B, S, omega)
 
         #attr contra
-        new1_loss = self.attr_contra_loss(new1, attr_data, labels, pos_th = 2)
-        new1_w = 1.
+        new1_loss = self.attr_contra_loss(new1, attr_data, labels, pos_th = 0.02)
+        new1_w = 0.2
         # print(torch.max(t),torch.min(t),torch.mean(t))  #0.047,-0.046,-0.0024  0.03 for sun
         #                                                 #3   -4    0        2  for cub
         #                                                 # 1.6  -1.8   0     0.5 for awa2
