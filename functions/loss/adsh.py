@@ -523,20 +523,20 @@ class ADSHLoss(BaseClassificationLoss):
         margin_logits = self.get_margin_logits(logits, labels)
         ce = F.cross_entropy(margin_logits, labels)
 
-        hd = self.get_hamming_distance()
-        triu = torch.ones_like(hd).bool()
-        triu = torch.triu(triu, 1)
+        # hd = self.get_hamming_distance()
+        # triu = torch.ones_like(hd).bool()
+        # triu = torch.triu(triu, 1)
 
-        hd_triu = hd[triu]
+        # hd_triu = hd[triu]
 
-        meanhd = torch.mean(-hd_triu)
-        varhd = torch.var(hd_triu)
+        # meanhd = torch.mean(-hd_triu)
+        # varhd = torch.var(hd_triu)
 
         self.losses['ce'] = ce
-        self.losses['meanhd'] = meanhd
-        self.losses['varhd'] = varhd
+        # self.losses['meanhd'] = meanhd
+        # self.losses['varhd'] = varhd
 
-        loss = ce + self.alpha * meanhd + self.beta * varhd + \
+        loss = ce +  \
                 new1_w*new1_loss + \
                 transzero_loss
                 #adsh_w*adsh_loss
