@@ -360,7 +360,6 @@ class CubDataset(Dataset):
         
         self.original_att = np.array(hf.get('original_att'))
         # print(self.original_att.shape) #200, 312
-        # bb
         #self.original_att = torch.from_numpy(original_att).float().to(self.device)
         
         self.w2v_att = np.array(hf.get('w2v_att'))
@@ -521,17 +520,16 @@ class SunDataset(Dataset):
 
         #print('Expert Attr')
         self.att = np.array(hf.get('att'))
-        #print(self.att.shape) #717, 102
+        #print(self.att.shape) #
         #self.att = torch.from_numpy(att).float().to(self.device)
         
         self.original_att = np.array(hf.get('original_att'))
-        #print(self.original_att.shape) #717, 102
-        # bb
+        #print(self.original_att.shape) 
         #self.original_att = torch.from_numpy(original_att).float().to(self.device)
         
         self.w2v_att = np.array(hf.get('w2v_att'))
         #self.w2v_att = torch.from_numpy(w2v_att).float().to(self.device)
-        #print(self.w2v_att.shape) #102, 300
+        #print(self.w2v_att.shape) 
         #bb
         self.normalize_att = self.original_att/100
 

@@ -238,7 +238,7 @@ class ADSHLoss(BaseClassificationLoss):
         # time.sleep(10000)
 
         loss_CE = self.compute_aug_cross_entropy(in_package)
-        loss_cal = self.compute_loss_Self_Calibrate(in_package)
+        loss_cal = 0#self.compute_loss_Self_Calibrate(in_package)
         loss_reg = self.compute_reg_loss(in_package)
         # bb
         sim_i2t = F.normalize(in_package['im_to_att_embedding'],dim=1)
@@ -490,21 +490,21 @@ class ADSHLoss(BaseClassificationLoss):
         transzero_loss *= transzero_w
 
         ### nips2020
-        attr_w = 0#2for cub  0.5for awa2  2for sun
-        self.attrloss = 0#self.nips2020attrloss(pre_attri, pre_class,label_a,label_v,attention,middle_graph)
+        # attr_w = 0#2for cub  0.5for awa2  2for sun
+        # self.attrloss = 0#self.nips2020attrloss(pre_attri, pre_class,label_a,label_v,attention,middle_graph)
 
         # ### cvpr2021
-        ins_w = 0#2#1for cub   0.2for awa2   4for sun
-        # cls_w = 0#1for cub   0.2for awa2   4for sun
-        real_ins_contras_loss = self.contras_criterion(outz_real, label_v)
-        if torch.isnan(real_ins_contras_loss):
-            real_ins_contras_loss = 0
+        # ins_w = 0#2#1for cub   0.2for awa2   4for sun
+        # # cls_w = 0#1for cub   0.2for awa2   4for sun
+        # real_ins_contras_loss = self.contras_criterion(outz_real, label_v)
+        # if torch.isnan(real_ins_contras_loss):
+        #     real_ins_contras_loss = 0
         # cls_loss_real = self.class_scores_for_loop(embed_real, label_v, attr_data, Dis_Embed_Att)
 
 
         # ### IJCAI21
-        icjai_w = 0#0.1for cub   0.1for awa2   6for sun
-        icjai21loss = self.ijcai21loss(code_logits, label_v)
+        # icjai_w = 0#0.1for cub   0.1for awa2   6for sun
+        # icjai21loss = self.ijcai21loss(code_logits, label_v)
 
 
         # ### ECCV2022
@@ -536,9 +536,7 @@ class ADSHLoss(BaseClassificationLoss):
         self.losses['meanhd'] = meanhd
         self.losses['varhd'] = varhd
 
-        loss = ce + self.alpha * meanhd + self.beta * varhd +attr_w*self.attrloss + \
-                ins_w*real_ins_contras_loss + \
-                icjai_w*icjai21loss + \
+        loss = ce + self.alpha * meanhd + self.beta * varhd + \
                 new1_w*new1_loss + \
                 transzero_loss
                 #adsh_w*adsh_loss
