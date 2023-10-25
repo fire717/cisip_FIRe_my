@@ -237,7 +237,7 @@ class ADSHLoss(BaseClassificationLoss):
         # import time
         # time.sleep(10000)
 
-        loss_CE = self.compute_aug_cross_entropy(in_package)
+        loss_CE = 0#self.compute_aug_cross_entropy(in_package)
         loss_cal = 0#self.compute_loss_Self_Calibrate(in_package)
         loss_reg = self.compute_reg_loss(in_package)
         # bb
