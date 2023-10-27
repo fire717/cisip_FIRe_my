@@ -489,7 +489,7 @@ def main(config, gpu_transform=False, gpu_mean_transform=False, method='supervis
     #print("-=-=-=-= : ", train_paths[:3])
     ##### model preparation #####
     model = prepare_model(config, device)
-    logging.info(model)
+    #logging.info(model)
     load_model(model, config)
     preprocess(model, config, device)
 

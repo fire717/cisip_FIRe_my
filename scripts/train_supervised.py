@@ -7,7 +7,7 @@ def get_output_and_loss_supervised(model, criterion, data, labels, index, onehot
                     loss_name, loss_cfg, stage, no_loss, attr_data, label_a, label_v, middle_graph,
                     B,S,omega):
     #logits, code_logits = model(data)[:2]
-    logits, code_logits, pre_attri, pre_class,attention,embed_real, outz_real,new1,package = model(data, attr_data)
+    logits, code_logits, new1,package = model(data, attr_data)
     # print(labels.shape, label_a.shape, label_v.shape)
     # bb
     package['batch_label'] = label_v
@@ -18,9 +18,8 @@ def get_output_and_loss_supervised(model, criterion, data, labels, index, onehot
         loss = torch.tensor(0.)
     else:
         loss = criterion(logits, code_logits, labels, 
-                    pre_attri, pre_class,label_a,label_v,attention,middle_graph,
-                    embed_real, outz_real, attr_data, model.Dis_Embed_Att, new1,
-                    B,S,omega,package,
+                    attr_data, new1,
+                    package,
                     onehot=onehot)
     return {
                'logits': logits,

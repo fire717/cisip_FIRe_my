@@ -463,14 +463,14 @@ class ArchOrthoHash(BaseArch):
         new1 = self.attr_fc(new1)  #64,85,128
 
         ### add 2020nips attr branch
-        attention = self.attr_conv(features) #64,85,7,7
-        pre_attri = F.avg_pool2d(attention, kernel_size= features.shape[2]).view(features.shape[0], -1).double() #64,85
-        pre_class = self.softmax(pre_attri.mm(attribute))#64x50
+        # attention = self.attr_conv(features) #64,85,7,7
+        # pre_attri = F.avg_pool2d(attention, kernel_size= features.shape[2]).view(features.shape[0], -1).double() #64,85
+        # pre_class = self.softmax(pre_attri.mm(attribute))#64x50
 
         ### add 2021cvpr bracnch
-        embedding= self.Embedding_Net_fc1(x)
-        out_z = F.normalize(self.Embedding_Net_fc2(embedding), dim=1) #实例对比学习512维向量
+        # embedding= self.Embedding_Net_fc1(x)
+        # out_z = F.normalize(self.Embedding_Net_fc2(embedding), dim=1) #实例对比学习512维向量
 
         v = self.hash_fc(x)
         u = self.ce_fc(v)
-        return u, v, pre_attri, pre_class,attention,embedding,out_z,new1,package
+        return u, v, new1,package

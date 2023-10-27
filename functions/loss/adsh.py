@@ -470,9 +470,8 @@ class ADSHLoss(BaseClassificationLoss):
 
 
     def forward(self, logits, code_logits, labels, 
-        pre_attri, pre_class,label_a,label_v,attention,middle_graph,
-        embed_real, outz_real,attr_data,Dis_Embed_Att, new1,
-        B=None, S=None, omega=None,package=None,
+        attr_data, new1,
+        package=None,
         onehot=True):
         if self.multiclass:
             logits, labels = self.get_dynamic_logits(logits, code_logits, labels)
@@ -514,8 +513,8 @@ class ADSHLoss(BaseClassificationLoss):
         #     adsh_loss, _, _ = self.criterion_eccv2022_semicon(code_logits, B, S, omega)
 
         #attr contra
-        new1_loss = self.attr_contra_loss(new1, attr_data, labels, pos_th = 2)
-        new1_w = 1
+        # new1_loss = self.attr_contra_loss(new1, attr_data, labels, pos_th = 2)
+        # new1_w = 1
         # print(torch.max(t),torch.min(t),torch.mean(t))  #0.047,-0.046,-0.0024  0.03 for sun
         #                                                 #3   -4    0        2  for cub
         #                                                 # 1.6  -1.8   0     0.5 for awa2
@@ -537,7 +536,6 @@ class ADSHLoss(BaseClassificationLoss):
         # self.losses['varhd'] = varhd
 
         loss = ce +  \
-                new1_w*new1_loss + \
                 transzero_loss
                 #adsh_w*adsh_loss
 
